@@ -45,6 +45,7 @@ export const useWMStore = create<WMState>((set, get) => ({
       minimized: false,
       maximized: false,
       resizable: input.resizable ?? true,
+      initData: input.initData,
     }
     set((s) => ({
       windows: s.windows.map((w) => ({ ...w, focused: false })).concat(next),

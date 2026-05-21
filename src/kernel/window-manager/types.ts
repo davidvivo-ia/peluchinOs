@@ -22,6 +22,7 @@ export interface WindowState {
   minimized: boolean
   maximized: boolean
   resizable: boolean
+  initData?: unknown
 }
 
 export interface OpenWindowInput {
@@ -32,4 +33,5 @@ export interface OpenWindowInput {
   minSize?: Size
   resizable?: boolean
   position?: Position
+  initData?: unknown
 }
