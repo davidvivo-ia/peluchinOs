@@ -1,6 +1,9 @@
 import { eventViewerManifest } from './event-viewer/manifest'
 import { fileExplorerManifest } from './file-explorer/manifest'
+import { minesweeperManifest } from './minesweeper/manifest'
 import { notepadManifest } from './notepad/manifest'
+import { paintManifest } from './paint/manifest'
+import { solitaireManifest } from './solitaire/manifest'
 import { terminalManifest } from './terminal/manifest'
 import type { AppManifest } from './types'
 
@@ -8,6 +11,9 @@ export const apps: readonly AppManifest[] = [
   fileExplorerManifest,
   terminalManifest,
   notepadManifest,
+  paintManifest,
+  minesweeperManifest,
+  solitaireManifest,
   eventViewerManifest,
 ] as const
 
