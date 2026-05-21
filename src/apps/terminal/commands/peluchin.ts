@@ -1,4 +1,5 @@
 import { apps, getApp } from '@/apps/registry'
+import { getHostInfo, isTauri, listHostDir, readHostFile, writeHostFile } from '@/kernel/host'
 import { useLogStore } from '@/kernel/logger'
 import { useWMStore } from '@/kernel/window-manager'
 import type { Command } from '../types'
@@ -165,6 +166,67 @@ const history: Command = {
   },
 }
 
+const host: Command = {
+  name: 'host',
+  description: 'Show host system info (Tauri only outside browser)',
+  usage: 'host [info|read|write|ls] [args...]',
+  run: async (ctx) => {
+    const sub = ctx.args[0] ?? 'info'
+    if (sub === 'info') {
+      try {
+        const info = await getHostInfo()
+        const lines = [
+          `tauri:        ${isTauri()}`,
+          `os:           ${info.os}`,
+          `arch:         ${info.arch}`,
+          `family:       ${info.family}`,
+          `hostname:     ${info.hostname}`,
+          `cwd:          ${info.cwd}`,
+          `tauri version: ${info.tauri_version}`,
+          `epoch (ms):   ${info.epoch_ms}`,
+        ]
+        return { stdout: `${lines.join('\n')}\n`, exitCode: 0 }
+      } catch (e) {
+        return { stderr: `host: ${(e as Error).message}`, exitCode: 1 }
+      }
+    }
+    if (sub === 'ls') {
+      const path = ctx.args[1] ?? '.'
+      try {
+        const entries = await listHostDir(path)
+        const lines = entries.map(
+          (e) => `${e.is_dir ? 'd' : '-'}  ${String(e.size).padStart(8)}  ${e.name}`,
+        )
+        return { stdout: `${lines.join('\n')}\n`, exitCode: 0 }
+      } catch (e) {
+        return { stderr: `host ls: ${(e as Error).message}`, exitCode: 1 }
+      }
+    }
+    if (sub === 'read') {
+      const path = ctx.args[1]
+      if (!path) return { stderr: 'host read: missing path', exitCode: 1 }
+      try {
+        const r = await readHostFile(path)
+        return { stdout: r.content, exitCode: 0 }
+      } catch (e) {
+        return { stderr: `host read: ${(e as Error).message}`, exitCode: 1 }
+      }
+    }
+    if (sub === 'write') {
+      const path = ctx.args[1]
+      if (!path) return { stderr: 'host write: missing path', exitCode: 1 }
+      const text = ctx.stdin || ctx.args.slice(2).join(' ')
+      try {
+        const n = await writeHostFile(path, text)
+        return { stdout: `wrote ${n} bytes to ${path}\n`, exitCode: 0 }
+      } catch (e) {
+        return { stderr: `host write: ${(e as Error).message}`, exitCode: 1 }
+      }
+    }
+    return { stderr: `host: unknown sub-command: ${sub}`, exitCode: 1 }
+  },
+}
+
 export const PELUCHIN_COMMANDS: Command[] = [
   dmesg,
   loggerCmd,
@@ -175,4 +237,5 @@ export const PELUCHIN_COMMANDS: Command[] = [
   reboot,
   shutdown,
   history,
+  host,
 ]

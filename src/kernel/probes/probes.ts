@@ -216,4 +216,22 @@ export const probes: readonly Probe[] = [
       return { status: 'ok' }
     },
   },
+  {
+    service: 'Host Bridge (tauri.service)',
+    run: async () => {
+      const w = window as unknown as { __TAURI_INTERNALS__?: unknown }
+      if (!w.__TAURI_INTERNALS__) {
+        return { status: 'warn', detail: 'running in browser, no native host bridge' }
+      }
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const info = (await invoke('host_info')) as { os?: string }
+        return info?.os
+          ? { status: 'ok' }
+          : { status: 'warn', detail: 'host_info returned unexpected payload' }
+      } catch (e) {
+        return { status: 'failed', detail: (e as Error).message }
+      }
+    },
+  },
 ]
