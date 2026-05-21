@@ -50,3 +50,18 @@ body {
   border-bottom: 1px solid var(--color-win-white);
   box-shadow: inset 1px 1px 0 var(--color-win-gray-dark);
 }
+
+@keyframes cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@utility animate-cursor {
+  animation: cursor-blink 1s steps(2) infinite;
+}

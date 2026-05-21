@@ -7,7 +7,6 @@ import { Desktop } from './shell/desktop/Desktop'
 
 type SystemState = 'booting' | 'ready'
 
-const BOOT_DURATION_MS = 3400
 const sys = createLogger('system')
 
 export function App() {
@@ -16,11 +15,6 @@ export function App() {
   useEffect(() => {
     installGlobalCapture()
     logger.info('peluchinOs starting')
-    const id = setTimeout(() => {
-      sys.info('shell ready')
-      setState('ready')
-    }, BOOT_DURATION_MS)
-    return () => clearTimeout(id)
   }, [])
 
   useEffect(() => {
@@ -53,5 +47,14 @@ export function App() {
     return () => document.removeEventListener('keydown', onKey)
   }, [state])
 
-  return state === 'booting' ? <BootScreen /> : <Desktop />
+  return state === 'booting' ? (
+    <BootScreen
+      onComplete={() => {
+        sys.info('shell ready')
+        setState('ready')
+      }}
+    />
+  ) : (
+    <Desktop />
+  )
 }
