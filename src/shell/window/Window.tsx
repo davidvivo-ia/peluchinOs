@@ -46,7 +46,7 @@ export function Window({ window: w, children }: WindowProps) {
     <div
       data-window-id={w.id}
       data-focused={w.focused}
-      className="absolute bevel-out bg-[var(--color-win-gray)] flex flex-col shadow-md"
+      className="absolute bevel-out bg-[var(--color-win-gray)] flex flex-col shadow-md animate-window-open"
       style={style}
       onMouseDown={onClick}
     >

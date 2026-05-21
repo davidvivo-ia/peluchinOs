@@ -65,3 +65,37 @@ body {
 @utility animate-cursor {
   animation: cursor-blink 1s steps(2) infinite;
 }
+
+@keyframes window-open {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@utility animate-window-open {
+  animation: window-open 120ms ease-out;
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-3px);
+  }
+  40%,
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@utility animate-shake {
+  animation: shake 200ms ease-in-out;
+}

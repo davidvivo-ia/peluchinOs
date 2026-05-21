@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid'
 import { create } from 'zustand'
+import { sounds } from '../audio'
 import { createLogger } from '../logger'
 import type { OpenWindowInput, Position, Size, WindowState } from './types'
 
@@ -52,10 +53,12 @@ export const useWMStore = create<WMState>((set, get) => ({
       topZ,
     }))
     log.info(`window opened: ${input.appId}`, { id, title: input.title })
+    sounds.windowOpen()
     return id
   },
   close: (id) => {
     set((s) => ({ windows: s.windows.filter((w) => w.id !== id) }))
+    sounds.windowClose()
     log.debug('window closed', { id })
   },
   focus: (id) =>

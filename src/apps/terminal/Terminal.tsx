@@ -1,5 +1,6 @@
 import { getApp } from '@/apps/registry'
 import { createLogger } from '@/kernel/logger'
+import { useSystemStore } from '@/kernel/system'
 import { bootstrapFilesystem, toDosPath } from '@/kernel/vfs'
 import { useWMStore } from '@/kernel/window-manager'
 import type { WindowState } from '@/kernel/window-manager'
@@ -81,18 +82,11 @@ export function Terminal({ window: w }: { window: WindowState }) {
     exit: () => useWMStore.getState().close(w.id),
     reboot: () => {
       log.info('terminal: reboot requested')
-      setTimeout(() => location.reload(), 100)
+      useSystemStore.getState().requestReboot()
     },
     shutdown: () => {
-      log.warn('terminal: shutdown requested (no-op)')
-      setLines((prev) => [
-        ...prev,
-        {
-          id: nextIdRef.current++,
-          stream: 'info',
-          text: 'System halted. (browser shutdown not implemented — close the tab)',
-        },
-      ])
+      log.warn('terminal: shutdown requested')
+      useSystemStore.getState().requestShutdown()
     },
     open: (appId: string) => {
       const app = getApp(appId)
