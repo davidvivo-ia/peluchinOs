@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+  --color-win-gray: #c0c0c0;
+  --color-win-gray-light: #dfdfdf;
+  --color-win-gray-dark: #808080;
+  --color-win-gray-darker: #404040;
+  --color-win-white: #ffffff;
+  --color-win-black: #000000;
+  --color-win-blue: #000080;
+  --color-win-blue-light: #1084d0;
+  --color-win-cyan: #00a2e8;
+  --color-win-teal: #008080;
+  --color-win-title-from: #0a246a;
+  --color-win-title-to: #a6caf0;
+  --font-system: "Tahoma", "MS Sans Serif", "Segoe UI", system-ui, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-system);
+  font-size: 12px;
+}
+
+body {
+  background: var(--color-win-teal);
+  -webkit-font-smoothing: none;
+  color: var(--color-win-black);
+  user-select: none;
+  cursor: default;
+}
+
+@utility bevel-out {
+  border-top: 1px solid var(--color-win-white);
+  border-left: 1px solid var(--color-win-white);
+  border-right: 1px solid var(--color-win-gray-darker);
+  border-bottom: 1px solid var(--color-win-gray-darker);
+  box-shadow: inset -1px -1px 0 var(--color-win-gray-dark), inset 1px 1px 0
+    var(--color-win-gray-light);
+}
+
+@utility bevel-in {
+  border-top: 1px solid var(--color-win-gray-darker);
+  border-left: 1px solid var(--color-win-gray-darker);
+  border-right: 1px solid var(--color-win-white);
+  border-bottom: 1px solid var(--color-win-white);
+  box-shadow: inset 1px 1px 0 var(--color-win-gray-dark);
+}
