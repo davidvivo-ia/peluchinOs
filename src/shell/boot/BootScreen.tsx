@@ -1,17 +1,28 @@
 import { createLogger } from '@/kernel/logger'
 import type { LogLevel } from '@/kernel/logger'
+import { probes, runProbe } from '@/kernel/probes'
+import type { Probe } from '@/kernel/probes'
 import { useEffect, useRef, useState } from 'react'
 
 const log = createLogger('boot')
 
-type LineKind = 'kernel' | 'ok' | 'failed' | 'warn' | 'tty'
+type LineKind = 'kernel' | 'ok' | 'failed' | 'warn' | 'tty' | 'detail'
 
-interface QueueItem {
+interface StaticItem {
+  kind: 'static'
   delay: number
-  kind: LineKind
+  lineKind: Exclude<LineKind, 'detail'>
   text: string
   logLevel?: LogLevel
 }
+
+interface ProbeItem {
+  kind: 'probe'
+  delay: number
+  probe: Probe
+}
+
+type QueueItem = StaticItem | ProbeItem
 
 interface RenderedLine {
   id: number
@@ -20,70 +31,60 @@ interface RenderedLine {
   ts: number
 }
 
-const QUEUE: ReadonlyArray<QueueItem> = [
-  { delay: 0, kind: 'tty', text: 'Welcome to peluchinOs 0.0.1-fluffy (Linux 6.18.5-peluchin)!' },
-  { delay: 40, kind: 'tty', text: '' },
-  {
-    delay: 10,
-    kind: 'kernel',
-    text: 'Linux version 6.18.5-peluchin (root@plushie-build) (gcc 14.1.0) #1 SMP',
-  },
-  {
-    delay: 30,
-    kind: 'kernel',
-    text: 'Command line: BOOT_IMAGE=/peluchinOs ro quiet splash theme=win2k-hybrid',
-  },
-  {
-    delay: 20,
-    kind: 'kernel',
-    text: 'CPU0: stuffed cotton @ 95.00 MHz (family 0x3, model 0x1, stepping 0x2)',
-  },
-  { delay: 18, kind: 'kernel', text: 'x86/fpu: Supported XSAVE features: hugs, pats, snuggles' },
-  { delay: 15, kind: 'kernel', text: 'Memory: 128K/256K available (plushie heap @ 0xfeedface)' },
-  { delay: 25, kind: 'kernel', text: 'ACPI: bus type PCI registered' },
-  {
-    delay: 20,
-    kind: 'kernel',
-    text: 'pci 0000:00:01.0: VGA-compatible controller [0300]: peluchin display',
-  },
-  { delay: 35, kind: 'kernel', text: 'usbcore: registered new interface driver usb-storage' },
-  { delay: 30, kind: 'kernel', text: 'random: crng init done (entropy harvested from teddy bear)' },
-  {
-    delay: 40,
-    kind: 'kernel',
-    text: 'EXT4-fs (plush0): mounted filesystem with ordered data mode',
-  },
-  { delay: 30, kind: 'kernel', text: 'systemd[1]: peluchinOs 247.3-1pelu running in system mode' },
-  { delay: 80, kind: 'tty', text: '' },
-  { delay: 10, kind: 'ok', text: 'Started udev Kernel Device Manager' },
-  { delay: 25, kind: 'ok', text: 'Mounted /home (plushfs)' },
-  { delay: 25, kind: 'ok', text: 'Reached target Local File Systems' },
-  { delay: 35, kind: 'ok', text: 'Started Kernel Logger Subsystem' },
-  { delay: 25, kind: 'ok', text: 'Started Event Bus' },
-  {
-    delay: 25,
-    kind: 'warn',
-    text: 'plushfs autofsck not yet implemented — skipping integrity check',
-    logLevel: 'warn',
-  },
-  { delay: 30, kind: 'ok', text: 'Started Window Manager (wm.service)' },
-  { delay: 25, kind: 'ok', text: 'Started Theme Engine (win2k-hybrid)' },
-  { delay: 25, kind: 'ok', text: 'Started Application Registry' },
-  { delay: 25, kind: 'ok', text: 'Started peluchinOs Session Manager' },
-  { delay: 30, kind: 'ok', text: 'Reached target Multi-User System' },
-  { delay: 30, kind: 'ok', text: 'Reached target Graphical Interface' },
-  { delay: 200, kind: 'tty', text: '' },
-  { delay: 10, kind: 'tty', text: 'peluchinOs 0.0.1-fluffy ttyS0' },
-  { delay: 250, kind: 'tty', text: '' },
-  { delay: 80, kind: 'tty', text: 'peluchinOs login: peluchin' },
-  { delay: 480, kind: 'tty', text: 'Password: ********' },
-  { delay: 320, kind: 'tty', text: '' },
-  { delay: 20, kind: 'tty', text: 'Last login: Wed May 20 23:47:11 2026 on ttyS0' },
-  { delay: 20, kind: 'tty', text: 'peluchin@peluchinos:~$ startx' },
-  { delay: 220, kind: 'tty', text: '  → connecting to display :0' },
-  { delay: 110, kind: 'tty', text: '  → loading wm.service' },
-  { delay: 110, kind: 'tty', text: '  → mounting desktop environment' },
-] as const
+const t = (
+  delay: number,
+  lineKind: StaticItem['lineKind'],
+  text: string,
+  logLevel?: LogLevel,
+): StaticItem => ({ kind: 'static', delay, lineKind, text, logLevel })
+
+const KERNEL_INTRO: QueueItem[] = [
+  t(0, 'tty', 'Welcome to peluchinOs 0.0.1-fluffy (Linux 6.18.5-peluchin)!'),
+  t(40, 'tty', ''),
+  t(10, 'kernel', 'Linux version 6.18.5-peluchin (root@plushie-build) (gcc 14.1.0) #1 SMP'),
+  t(30, 'kernel', 'Command line: BOOT_IMAGE=/peluchinOs ro quiet splash theme=win2k-hybrid'),
+  t(20, 'kernel', 'CPU0: stuffed cotton @ 95.00 MHz (family 0x3, model 0x1, stepping 0x2)'),
+  t(18, 'kernel', 'x86/fpu: Supported XSAVE features: hugs, pats, snuggles'),
+  t(15, 'kernel', 'Memory: 128K/256K available (plushie heap @ 0xfeedface)'),
+  t(25, 'kernel', 'ACPI: bus type PCI registered'),
+  t(20, 'kernel', 'pci 0000:00:01.0: VGA-compatible controller [0300]: peluchin display'),
+  t(35, 'kernel', 'usbcore: registered new interface driver usb-storage'),
+  t(30, 'kernel', 'random: crng init done (entropy harvested from teddy bear)'),
+  t(40, 'kernel', 'EXT4-fs (plush0): mounted filesystem with ordered data mode'),
+  t(30, 'kernel', 'systemd[1]: peluchinOs 247.3-1pelu running in system mode'),
+  t(60, 'tty', ''),
+  t(0, 'tty', 'Running peluchinOs self-tests...'),
+  t(20, 'tty', ''),
+]
+
+const REACHED_TARGETS: QueueItem[] = [
+  t(60, 'tty', ''),
+  t(20, 'ok', 'Reached target Multi-User System.'),
+  t(20, 'ok', 'Reached target Graphical Interface.'),
+]
+
+const LOGIN_OUTRO: QueueItem[] = [
+  t(160, 'tty', ''),
+  t(10, 'tty', 'peluchinOs 0.0.1-fluffy ttyS0'),
+  t(220, 'tty', ''),
+  t(60, 'tty', 'peluchinOs login: peluchin'),
+  t(420, 'tty', 'Password: ********'),
+  t(280, 'tty', ''),
+  t(20, 'tty', 'Last login: Wed May 20 23:47:11 2026 on ttyS0'),
+  t(20, 'tty', 'peluchin@peluchinos:~$ startx'),
+  t(200, 'tty', '  → connecting to display :0'),
+  t(110, 'tty', '  → loading wm.service'),
+  t(110, 'tty', '  → mounting desktop environment'),
+]
+
+function buildQueue(): QueueItem[] {
+  const probeItems: ProbeItem[] = probes.map((probe) => ({
+    kind: 'probe',
+    delay: 45,
+    probe,
+  }))
+  return [...KERNEL_INTRO, ...probeItems, ...REACHED_TARGETS, ...LOGIN_OUTRO]
+}
 
 interface BootScreenProps {
   onComplete: () => void
@@ -98,52 +99,103 @@ export function BootScreen({ onComplete }: BootScreenProps) {
   useEffect(() => {
     let cancelled = false
     let timeoutId: ReturnType<typeof setTimeout> | undefined
+    let pendingResolve: (() => void) | null = null
     let elapsedSec = 0
-    let i = 0
     let nextId = 0
+    const queue = buildQueue()
+    const probeStartTime = Date.now()
+    let probesProcessed = 0
+    const tally = { ok: 0, warn: 0, failed: 0 }
+    const totalProbes = queue.filter((q) => q.kind === 'probe').length
 
     setLines([])
 
-    function step() {
-      if (cancelled) return
-      if (i >= QUEUE.length) {
+    function wait(ms: number) {
+      return new Promise<void>((resolve) => {
+        pendingResolve = resolve
         timeoutId = setTimeout(() => {
-          if (!cancelled) onCompleteRef.current()
-        }, 650)
-        return
-      }
-      const item = QUEUE[i]
-      timeoutId = setTimeout(() => {
-        if (cancelled) return
-        elapsedSec += item.delay / 1000
-        const line: RenderedLine = {
-          id: nextId++,
-          kind: item.kind,
-          text: item.text,
-          ts: elapsedSec,
-        }
-        setLines((prev) => [...prev, line])
-
-        if (item.text) {
-          const level: LogLevel =
-            item.logLevel ??
-            (item.kind === 'failed' ? 'error' : item.kind === 'warn' ? 'warn' : 'info')
-          log[level](item.text)
-        }
-        i++
-        step()
-      }, item.delay)
+          pendingResolve = null
+          resolve()
+        }, ms)
+      })
     }
 
-    step()
+    function pushLine(line: Omit<RenderedLine, 'id'>) {
+      const id = nextId++
+      setLines((prev) => [...prev, { ...line, id }])
+    }
+
+    function logForStatic(item: StaticItem) {
+      if (!item.text) return
+      const level: LogLevel =
+        item.logLevel ??
+        (item.lineKind === 'failed' ? 'error' : item.lineKind === 'warn' ? 'warn' : 'info')
+      log[level](item.text)
+    }
+
+    async function processProbe(item: ProbeItem) {
+      const result = await runProbe(item.probe)
+      if (cancelled) return
+      const text =
+        result.status === 'failed'
+          ? `Failed to start ${item.probe.service}.`
+          : `Started ${item.probe.service}.`
+      const lineKind: LineKind =
+        result.status === 'ok' ? 'ok' : result.status === 'warn' ? 'warn' : 'failed'
+      pushLine({ kind: lineKind, text, ts: elapsedSec })
+
+      const logLevel: LogLevel =
+        result.status === 'ok' ? 'info' : result.status === 'warn' ? 'warn' : 'error'
+      log[logLevel](text, result.detail ? { detail: result.detail } : undefined)
+
+      if (result.detail && result.status !== 'ok') {
+        pushLine({ kind: 'detail', text: result.detail, ts: elapsedSec })
+      }
+
+      tally[result.status]++
+      probesProcessed++
+
+      if (probesProcessed === totalProbes) {
+        const took = ((Date.now() - probeStartTime) / 1000).toFixed(3)
+        const summary = `systemd[1]: Startup finished in ${took}s — ${tally.ok} ok, ${tally.warn} warn, ${tally.failed} failed.`
+        pushLine({ kind: 'kernel', text: summary, ts: elapsedSec })
+        const summaryLevel: LogLevel = tally.failed > 0 ? 'error' : tally.warn > 0 ? 'warn' : 'info'
+        log[summaryLevel](summary, { ...tally, durationSec: took })
+      }
+    }
+
+    async function run() {
+      for (const item of queue) {
+        if (cancelled) return
+        await wait(item.delay)
+        if (cancelled) return
+        elapsedSec += item.delay / 1000
+
+        if (item.kind === 'static') {
+          pushLine({ kind: item.lineKind, text: item.text, ts: elapsedSec })
+          logForStatic(item)
+        } else {
+          await processProbe(item)
+        }
+      }
+      if (cancelled) return
+      await wait(650)
+      if (!cancelled) onCompleteRef.current()
+    }
+
+    run().catch((e) => {
+      const msg = e instanceof Error ? e.message : String(e)
+      log.error(`boot sequence crashed: ${msg}`)
+    })
 
     return () => {
       cancelled = true
       if (timeoutId) clearTimeout(timeoutId)
+      if (pendingResolve) pendingResolve()
     }
   }, [])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pin to lines.length
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll on every new line
   useEffect(() => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight
@@ -169,6 +221,14 @@ function Line({ line }: { line: RenderedLine }) {
   if (line.kind === 'tty' && !line.text) return <div>&nbsp;</div>
   if (line.kind === 'tty') {
     return <div className="whitespace-pre-wrap">{line.text}</div>
+  }
+  if (line.kind === 'detail') {
+    return (
+      <div className="whitespace-pre-wrap">
+        <span className="text-[#888]">{'         └─ '}</span>
+        <span className="text-[#bbb]">{line.text}</span>
+      </div>
+    )
   }
   if (line.kind === 'kernel') {
     return (
