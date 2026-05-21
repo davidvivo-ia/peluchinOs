@@ -15,8 +15,10 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "nanoid": "^5.1.11",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

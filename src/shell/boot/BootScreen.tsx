@@ -1,14 +1,44 @@
-import { useEffect, useState } from 'react'
+import { createLogger } from '@/kernel/logger'
+import { useEffect, useMemo, useState } from 'react'
+
+const log = createLogger('boot')
+
+const BOOT_STEPS = [
+  { progress: 8, message: 'POST: ok' },
+  { progress: 22, message: 'mounting kernel modules' },
+  { progress: 38, message: 'starting logger subsystem' },
+  { progress: 55, message: 'starting window manager' },
+  { progress: 72, message: 'registering apps' },
+  { progress: 88, message: 'loading shell' },
+  { progress: 100, message: 'peluchinOs ready' },
+] as const
 
 export function BootScreen() {
   const [progress, setProgress] = useState(0)
+  const [stepIndex, setStepIndex] = useState(-1)
+
+  const nextStepProgress = useMemo(() => BOOT_STEPS[stepIndex + 1]?.progress ?? 100, [stepIndex])
+
+  useEffect(() => {
+    log.info('POST: power-on self-test')
+  }, [])
 
   useEffect(() => {
     const id = setInterval(() => {
-      setProgress((p) => Math.min(p + 4 + Math.random() * 9, 100))
-    }, 120)
+      setProgress((p) => Math.min(p + 3 + Math.random() * 6, 100))
+    }, 110)
     return () => clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    if (progress >= nextStepProgress && stepIndex < BOOT_STEPS.length - 1) {
+      const next = BOOT_STEPS[stepIndex + 1]
+      log.info(next.message)
+      setStepIndex(stepIndex + 1)
+    }
+  }, [progress, stepIndex, nextStepProgress])
+
+  const currentMessage = stepIndex >= 0 ? BOOT_STEPS[stepIndex].message : 'POST: power-on self-test'
 
   return (
     <div className="h-full w-full bg-black flex flex-col items-center justify-center relative">
@@ -16,7 +46,7 @@ export function BootScreen() {
         <h1 className="text-6xl font-bold text-white tracking-wide">
           peluchin<span className="text-[var(--color-win-cyan)]">Os</span>
         </h1>
-        <p className="text-white/70 text-xs uppercase tracking-[0.3em]">Starting peluchinOs…</p>
+        <p className="text-white/70 text-[10px] uppercase tracking-[0.3em] h-3">{currentMessage}</p>
         <ProgressBar value={progress} />
       </div>
       <p className="absolute bottom-6 text-white/40 text-[10px]">
