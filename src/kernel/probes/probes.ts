@@ -1,5 +1,6 @@
 import { apps, getApp } from '@/apps/registry'
 import { createLogger, useLogStore } from '@/kernel/logger'
+import { bootstrapFilesystem, vfs } from '@/kernel/vfs'
 import { useWMStore } from '@/kernel/window-manager'
 import type { Probe, ProbeResult } from './types'
 
@@ -164,10 +165,24 @@ export const probes: readonly Probe[] = [
   },
   {
     service: 'Plushie File System (plushfs)',
-    run: () => ({
-      status: 'warn',
-      detail: 'plushfs module not yet implemented — Phase 4',
-    }),
+    run: async () => {
+      await bootstrapFilesystem()
+      const probePath = '/tmp/__probe__'
+      const sentinel = `probe-${Date.now()}`
+      try {
+        await vfs.writeFile(probePath, sentinel)
+        const read = await vfs.readFile(probePath)
+        await vfs.unlink(probePath)
+        if (read !== sentinel) {
+          return { status: 'warn', detail: 'read-back content mismatch' }
+        }
+        const stat = await vfs.stat('/etc/peluchinos.conf').catch(() => null)
+        if (!stat) return { status: 'warn', detail: '/etc/peluchinos.conf missing after bootstrap' }
+        return { status: 'ok' }
+      } catch (e) {
+        return { status: 'failed', detail: (e as Error).message }
+      }
+    },
   },
   {
     service: 'Touch Input Driver',

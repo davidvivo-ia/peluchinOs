@@ -1,7 +1,8 @@
 import { eventViewerManifest } from './event-viewer/manifest'
+import { terminalManifest } from './terminal/manifest'
 import type { AppManifest } from './types'
 
-export const apps: readonly AppManifest[] = [eventViewerManifest] as const
+export const apps: readonly AppManifest[] = [terminalManifest, eventViewerManifest] as const
 
 const byId = new Map(apps.map((a) => [a.id, a]))
 
