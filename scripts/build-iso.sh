@@ -40,10 +40,11 @@ mmdebstrap --variant=minbase \
   --include='linux-image-amd64,live-boot,systemd-sysv,dbus,kbd,sudo,
             ca-certificates,xserver-xorg-core,xserver-xorg-legacy,
             xserver-xorg-input-libinput,xserver-xorg-video-fbdev,
-            xserver-xorg-video-vesa,xserver-xorg-video-qxl,xinit,
-            matchbox-window-manager,libgtk-3-0,libwebkit2gtk-4.1-0,
-            libayatana-appindicator3-1,librsvg2-2,libssl3,
-            fonts-dejavu-core,locales' \
+            xserver-xorg-video-vesa,xserver-xorg-video-qxl,
+            xserver-xorg-video-vmware,xserver-xorg-video-modesetting,
+            xinit,matchbox-window-manager,libgtk-3-0,
+            libwebkit2gtk-4.1-0,libayatana-appindicator3-1,librsvg2-2,
+            libssl3,fonts-dejavu-core,locales' \
   trixie chroot http://deb.debian.org/debian
 
 # 2/3/4. Install peluchinOs, autologin, kiosk session.
@@ -79,7 +80,16 @@ cat > /home/peluchin/.bash_profile <<'BP'
 case "$(tty)" in
   /dev/tty1)
     if [ -z "$DISPLAY" ]; then
-      exec startx -- -nocursor > /tmp/startx.log 2>&1
+      echo "[peluchinOs] starting X — this can take up to 30s on a cold VM..."
+      startx > /tmp/startx.log 2>&1
+      RC=$?
+      echo
+      echo "[peluchinOs] startx exited ($RC). Last 30 lines of /tmp/startx.log:"
+      tail -30 /tmp/startx.log 2>/dev/null
+      echo
+      echo "Press Enter to retry, or Ctrl+Alt+F2 for a shell on tty2."
+      read -r _ || true
+      exec bash -l
     fi
     ;;
 esac
@@ -87,13 +97,20 @@ BP
 
 cat > /home/peluchin/.xinitrc <<'XR'
 #!/bin/sh
+# Don't blank or DPMS during a kiosk session.
 xset s off -dpms s noblank 2>/dev/null
 matchbox-window-manager -use_titlebar no -use_cursor yes &
 sleep 0.5
 exec /usr/bin/peluchinos
 XR
 chmod +x /home/peluchin/.xinitrc
+# Mask Ctrl+Alt+Del so systemd doesn't eat the BSOD easter-egg chord.
+systemctl mask ctrl-alt-del.target >/dev/null 2>&1 || true
 chown -R peluchin:peluchin /home/peluchin
+
+# Don't suppress the OOM-killer info or any other useful kernel messages.
+# We boot the default entry in NON-quiet mode by default so a stuck VM
+# stays diagnosable.
 
 echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen >/dev/null
@@ -120,11 +137,11 @@ insmod gfxterm
 terminal_output gfxterm
 
 menuentry "peluchinOs Live" {
-    linux /boot/vmlinuz boot=live components quiet splash
+    linux /boot/vmlinuz boot=live components
     initrd /boot/initrd.img
 }
-menuentry "peluchinOs Live (verbose)" {
-    linux /boot/vmlinuz boot=live components
+menuentry "peluchinOs Live (quiet splash)" {
+    linux /boot/vmlinuz boot=live components quiet splash
     initrd /boot/initrd.img
 }
 menuentry "peluchinOs Live (text console)" {
