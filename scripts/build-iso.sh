@@ -96,8 +96,16 @@ StandardOutput=tty
 TTYPath=/dev/tty2
 TTYReset=yes
 TTYVHangup=yes
-ExecStart=/bin/sh -c 'clear; echo "[peluchinOs] live journalctl -b -f (Ctrl+Alt+F1 to return to GUI tty)"; echo; exec journalctl -b -f --no-pager'
+# `clear` would normally come from ncurses-bin (only a transitive
+# Recommends in minbase) — use the printf ANSI fallback so this still
+# works if a future build slims packages. \033c is the RIS terminal
+# reset sequence; supported on every Linux VT.
+ExecStart=/bin/sh -c 'printf "\\033c"; echo "[peluchinOs] live journalctl -b -f (Ctrl+Alt+F1 to return to GUI tty)"; echo; exec journalctl -b -f --no-pager'
 Restart=always
+# Without RestartSec systemd respawns ~10x/s on immediate-exit and
+# trips StartLimitBurst (default 5 in 10 s) — the unit then gets
+# parked in failed state and tty2 goes dark for the rest of the boot.
+RestartSec=2s
 
 [Install]
 WantedBy=multi-user.target
