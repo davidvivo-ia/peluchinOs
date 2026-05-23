@@ -33,18 +33,19 @@ mkdir -p "$WORK"/{chroot,iso-root/live,iso-root/boot/grub}
 cd "$WORK"
 
 # 1. Bootstrap minimal Debian Trixie with our required userspace.
+#    Note: --include MUST be a single-line, comma-separated list — line
+#    continuations inside the single-quoted argument keep the indentation
+#    spaces as part of the package name and apt then can't resolve them.
+#    Note: live-boot-initramfs-tools is listed explicitly so the initrd
+#    that linux-image-amd64 generates at install time contains the
+#    /scripts/live/ hooks. Without that, the kernel boots fine but the
+#    initrd doesn't know how to find /live/filesystem.squashfs and the
+#    boot hangs with a blinking cursor (no kernel output, because the
+#    panic happens before userspace sets up the console).
 echo ">>> bootstrapping Debian trixie ..."
 rm -rf chroot && mkdir chroot
 mmdebstrap --variant=minbase \
-  --keyring=/usr/share/keyrings/debian-archive-bookworm-stable.gpg \
-  --include='linux-image-amd64,live-boot,systemd-sysv,dbus,kbd,sudo,
-            ca-certificates,xserver-xorg-core,xserver-xorg-legacy,
-            xserver-xorg-input-libinput,xserver-xorg-video-fbdev,
-            xserver-xorg-video-vesa,xserver-xorg-video-qxl,
-            xserver-xorg-video-vmware,xserver-xorg-video-modesetting,
-            xinit,matchbox-window-manager,libgtk-3-0,
-            libwebkit2gtk-4.1-0,libayatana-appindicator3-1,librsvg2-2,
-            libssl3,fonts-dejavu-core,locales' \
+  --include='linux-image-amd64,live-boot,live-boot-initramfs-tools,initramfs-tools,systemd-sysv,dbus,kbd,sudo,ca-certificates,xserver-xorg-core,xserver-xorg-legacy,xserver-xorg-input-libinput,xserver-xorg-video-fbdev,xserver-xorg-video-vesa,xserver-xorg-video-qxl,xserver-xorg-video-vmware,xserver-xorg-video-modesetting,xinit,matchbox-window-manager,libgtk-3-0,libwebkit2gtk-4.1-0,libayatana-appindicator3-1,librsvg2-2,libssl3,fonts-dejavu-core,locales' \
   trixie chroot http://deb.debian.org/debian
 
 # 2/3/4. Install peluchinOs, autologin, kiosk session.
@@ -59,6 +60,14 @@ dpkg -i /tmp/peluchinos.deb || true
 apt-get update >/dev/null
 apt-get install -y -f >/dev/null
 rm /tmp/peluchinos.deb
+
+# Re-generate the initrd so it definitely includes live-boot's
+# /scripts/live hooks. mmdebstrap installs packages in a single batch
+# and the initrd built during linux-image's postinst can miss hooks
+# from packages configured later. Without this, the kernel boots but
+# the initrd never mounts /live/filesystem.squashfs and the VM hangs
+# at a blinking cursor.
+update-initramfs -u -k all
 
 useradd -m -s /bin/bash -G sudo,audio,video,input peluchin
 passwd -d peluchin
@@ -125,10 +134,25 @@ rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 EOF
 
 # 5. Stage kernel + initrd, write GRUB config, squash, build ISO.
+#    Pick the newest matching file deterministically — `cp vmlinuz-* dest`
+#    silently fails as soon as more than one kernel is installed.
 echo ">>> assembling ISO image ..."
-cp chroot/boot/vmlinuz-* iso-root/boot/vmlinuz
-cp chroot/boot/initrd.img-* iso-root/boot/initrd.img
+VMLINUZ="$(ls -1 chroot/boot/vmlinuz-* | sort -V | tail -n1)"
+INITRD="$(ls -1 chroot/boot/initrd.img-* | sort -V | tail -n1)"
+[ -f "$VMLINUZ" ] || { echo "no kernel in chroot/boot"; exit 1; }
+[ -f "$INITRD"  ] || { echo "no initrd in chroot/boot"; exit 1; }
+cp "$VMLINUZ" iso-root/boot/vmlinuz
+cp "$INITRD"  iso-root/boot/initrd.img
 
+# grub.cfg: keep it strictly to commands GRUB understands. The previous
+# version used a bash-style `cat <<'BANNER'` heredoc which GRUB parses
+# as a series of unknown commands — visible as parser errors above the
+# menu and, on some firmwares, a corrupted screen state. `echo` is the
+# correct GRUB equivalent.
+# `boot` is added explicitly at the end of each menuentry so the kernel
+# is launched even if the implicit-boot behaviour is disabled.
+# `console=tty0` forces output to the VGA console so we'd actually SEE
+# kernel panics in VirtualBox if anything goes wrong from here.
 cat > iso-root/boot/grub/grub.cfg <<'GRUB'
 set timeout=30
 set timeout_style=menu
@@ -143,27 +167,37 @@ fi
 set color_normal=light-gray/black
 set color_highlight=black/cyan
 
-cat <<'BANNER'
-   peluchinOs 0.0.1-fluffy — Linux 6.1 — Live ISO
-   ────────────────────────────────────────────────────────
-   Boot will start in 30 s. Use ↑/↓ + Enter to choose.
-BANNER
+echo "   peluchinOs 0.0.1-fluffy - Linux Live ISO"
+echo "   ----------------------------------------"
+echo "   Boot starts in 30 s. Use Up/Down + Enter."
+echo ""
 
-menuentry "peluchinOs Live (verbose boot)" {
-    linux /boot/vmlinuz boot=live components nomodeset
+menuentry "peluchinOs Live (verbose boot, recommended for VirtualBox)" {
+    echo "Loading kernel ..."
+    linux /boot/vmlinuz boot=live components nomodeset console=tty0
+    echo "Loading initramfs ..."
     initrd /boot/initrd.img
+    boot
 }
-menuentry "peluchinOs Live (default verbose)" {
-    linux /boot/vmlinuz boot=live components
+menuentry "peluchinOs Live (default verbose, KMS)" {
+    linux /boot/vmlinuz boot=live components console=tty0
     initrd /boot/initrd.img
+    boot
 }
 menuentry "peluchinOs Live (quiet splash)" {
     linux /boot/vmlinuz boot=live components quiet splash
     initrd /boot/initrd.img
+    boot
 }
-menuentry "peluchinOs Live (safe — text console only)" {
-    linux /boot/vmlinuz boot=live components 3 nomodeset
+menuentry "peluchinOs Live (safe - text console only, runlevel 3)" {
+    linux /boot/vmlinuz boot=live components 3 nomodeset console=tty0
     initrd /boot/initrd.img
+    boot
+}
+menuentry "peluchinOs Live (debug - break in initramfs)" {
+    linux /boot/vmlinuz boot=live components nomodeset console=tty0 break=premount
+    initrd /boot/initrd.img
+    boot
 }
 GRUB
 

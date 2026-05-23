@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - claude/retro-os-modern-tech-5GFAP
+      - claude/dazzling-fermi-qtPPl
     tags:
       - 'v*'
   workflow_dispatch:
