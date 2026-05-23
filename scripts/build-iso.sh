@@ -130,13 +130,30 @@ cp chroot/boot/vmlinuz-* iso-root/boot/vmlinuz
 cp chroot/boot/initrd.img-* iso-root/boot/initrd.img
 
 cat > iso-root/boot/grub/grub.cfg <<'GRUB'
-set timeout=3
+set timeout=30
+set timeout_style=menu
 set default=0
+
 insmod all_video
 insmod gfxterm
-terminal_output gfxterm
+if loadfont unicode ; then
+  terminal_output gfxterm
+fi
 
-menuentry "peluchinOs Live" {
+set color_normal=light-gray/black
+set color_highlight=black/cyan
+
+cat <<'BANNER'
+   peluchinOs 0.0.1-fluffy — Linux 6.1 — Live ISO
+   ────────────────────────────────────────────────────────
+   Boot will start in 30 s. Use ↑/↓ + Enter to choose.
+BANNER
+
+menuentry "peluchinOs Live (verbose boot)" {
+    linux /boot/vmlinuz boot=live components nomodeset
+    initrd /boot/initrd.img
+}
+menuentry "peluchinOs Live (default verbose)" {
     linux /boot/vmlinuz boot=live components
     initrd /boot/initrd.img
 }
@@ -144,8 +161,8 @@ menuentry "peluchinOs Live (quiet splash)" {
     linux /boot/vmlinuz boot=live components quiet splash
     initrd /boot/initrd.img
 }
-menuentry "peluchinOs Live (text console)" {
-    linux /boot/vmlinuz boot=live components 3
+menuentry "peluchinOs Live (safe — text console only)" {
+    linux /boot/vmlinuz boot=live components 3 nomodeset
     initrd /boot/initrd.img
 }
 GRUB
