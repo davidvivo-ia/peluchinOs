@@ -247,62 +247,100 @@ cat > iso-root/boot/grub/grub.cfg <<'GRUB'
 set timeout=30
 set timeout_style=menu
 set default=0
-set pager=1
+set pager=0
 
 insmod all_video
 insmod gfxterm
 insmod echo
 insmod cat
 insmod ls
+insmod serial
 if loadfont unicode ; then
   terminal_output gfxterm
 fi
+
+# Mirror GRUB output to COM1 so even GRUB's banner + menuentry exec
+# is captured by VirtualBox's "Serial Port 1 -> Raw File". Without
+# this, only kernel/userspace output reaches the serial log.
+serial --unit=0 --speed=115200
+terminal_input --append serial
+terminal_output --append serial
 
 set color_normal=light-gray/black
 set color_highlight=black/cyan
 
 echo "   peluchinOs Live ISO  -  DEBUG BUILD"
 echo "   ------------------------------------------------------"
-echo "   ISO contents under /boot/:"
-ls /boot/
+echo "   Pick (1) first.  Entry 1 prints what it's doing and"
+echo "   pauses 8 s before the kernel takes over, so you have"
+echo "   visible proof that GRUB advanced past file-load even"
+echo "   if the kernel itself stays silent on your VM."
 echo ""
-echo "   Build manifest (cat /boot/SIZES.txt for details):"
-cat /boot/SIZES.txt
-echo ""
-echo "   Pick (1) first. If it still hangs at a blinking cursor,"
-echo "   try (5) break=mountroot to drop into an initramfs shell"
-echo "   right before live-boot tries to mount the squashfs."
+echo "   If after picking (1) you ONLY see a blinking cursor for"
+echo "   90+ s, the kernel is loading but VirtualBox is not"
+echo "   painting its output.  Workarounds:"
+echo "    - Settings -> Display -> Graphics Controller = VMSVGA"
+echo "    - Settings -> System -> Acceleration = enable VT-x"
+echo "    - Try entry (4) runlevel 3 (text-only, smaller surface)"
+echo "    - Try entry (a) serial-only (output only to COM1)"
 echo ""
 
-menuentry "1. Loud verbose boot (recommended)  -  full kernel + live-boot debug" {
+menuentry "1. Safe boot (visible 8s countdown before handoff)" {
+    echo ""
+    echo "    >>> Loading kernel  /boot/vmlinuz ..."
+    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8
+    echo "    >>> Loading initrd  /boot/initrd.img ..."
+    initrd /boot/initrd.img
+    echo ""
+    echo "    >>> All loaded.  The screen WILL go black when the kernel"
+    echo "    >>> takes over - that is normal.  In VirtualBox with"
+    echo "    >>> VT-x ON you should see the peluchinOs desktop within"
+    echo "    >>> 30-60 s.  Without VT-x allow 2-3 MINUTES."
+    echo ""
+    echo "    >>> Booting in:"
+    sleep --verbose --interruptible 8
+    boot
+}
+
+menuentry "2. Loud verbose boot  -  full kernel + live-boot debug" {
     echo ">>> Loading /boot/vmlinuz ..."
-    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 printk.time=1 earlyprintk=vga,keep systemd.log_level=info systemd.log_target=kmsg
+    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 printk.time=1 systemd.log_level=info systemd.log_target=kmsg
     echo ">>> Loading /boot/initrd.img ..."
     initrd /boot/initrd.img
     echo ">>> Handing off to kernel ..."
     boot
 }
 
-menuentry "2. Default verbose KMS  -  no nomodeset, uses real DRM driver" {
+menuentry "3. Default verbose KMS  -  no nomodeset, uses real DRM driver" {
     echo ">>> Loading kernel (KMS mode) ..."
     linux /boot/vmlinuz boot=live components console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 printk.time=1
     initrd /boot/initrd.img
     boot
 }
 
-menuentry "3. Quiet splash  -  normal boot once ISO is known good" {
-    linux /boot/vmlinuz boot=live components quiet splash
-    initrd /boot/initrd.img
-    boot
-}
-
-menuentry "4. Runlevel 3 (text console, no X)  -  use to debug X failure" {
+menuentry "4. Runlevel 3 (text console, no X)  -  smaller surface, no display switch" {
     linux /boot/vmlinuz boot=live components 3 nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8
     initrd /boot/initrd.img
     boot
 }
 
-menuentry "5. DEBUG: break before mounting squashfs (initramfs busybox shell)" {
+menuentry "5. Serial-only boot  -  console ONLY on COM1, NO video output expected" {
+    echo "After booting this entry the screen stays blank by design."
+    echo "All output goes to COM1.  Set up VirtualBox Serial Port 1"
+    echo "in Raw File mode to a host file BEFORE picking this."
+    sleep --verbose --interruptible 5
+    linux /boot/vmlinuz boot=live components nomodeset console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 printk.time=1
+    initrd /boot/initrd.img
+    boot
+}
+
+menuentry "6. Quiet splash  -  normal boot once ISO is known good" {
+    linux /boot/vmlinuz boot=live components quiet splash
+    initrd /boot/initrd.img
+    boot
+}
+
+menuentry "7. DEBUG: break before mounting squashfs (initramfs busybox shell)" {
     echo "Will drop into an initramfs shell BEFORE mounting /live/."
     echo "Useful commands inside:"
     echo "  ls /         - what initramfs has"
@@ -315,7 +353,7 @@ menuentry "5. DEBUG: break before mounting squashfs (initramfs busybox shell)" {
     boot
 }
 
-menuentry "6. DEBUG: break AFTER mounting squashfs (rootfs busybox shell)" {
+menuentry "8. DEBUG: break AFTER mounting squashfs (rootfs busybox shell)" {
     echo "Will drop into a shell AFTER /live/filesystem.squashfs is"
     echo "mounted as the rootfs, but BEFORE init takes over."
     echo "  ls /run/live/medium  - the live medium"
@@ -325,19 +363,19 @@ menuentry "6. DEBUG: break AFTER mounting squashfs (rootfs busybox shell)" {
     boot
 }
 
-menuentry "7. DEBUG: break at TOP of initramfs (very first thing)" {
+menuentry "9. DEBUG: break at TOP of initramfs (very first thing)" {
     linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 break=top
     initrd /boot/initrd.img
     boot
 }
 
-menuentry "8. Single-user (rescue)  -  rootfs mounted, runlevel 1, root shell" {
+menuentry "a. Single-user (rescue)  -  rootfs mounted, runlevel 1, root shell" {
     linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 single
     initrd /boot/initrd.img
     boot
 }
 
-menuentry "9. GRUB cat  -  show /boot/SIZES.txt and stay in GRUB" {
+menuentry "b. GRUB cat  -  show /boot/SIZES.txt and stay in GRUB" {
     cat /boot/SIZES.txt
     echo ""
     echo "Press Esc to return to the menu."
