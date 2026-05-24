@@ -44,8 +44,27 @@ cd "$WORK"
 #    panic happens before userspace sets up the console).
 echo ">>> bootstrapping Debian trixie ..."
 rm -rf chroot && mkdir chroot
+# Package roll-call:
+#  - linux-image-amd64 + firmware-linux-free: kernel + the free firmware
+#    blobs every modern x86 platform asks for at probe time.
+#  - live-boot + live-boot-initramfs-tools + initramfs-tools: live ISO
+#    /scripts/live hooks in the initrd (without them the kernel boots
+#    fine and the initrd hangs - the original "blinking cursor" bug).
+#  - systemd-sysv: pid 1.  dbus: needed by webkit2gtk + matchbox.
+#  - kbd: console keymap.  sudo: passwordless wheel for peluchin.
+#  - procps + pciutils: for free/ps and lspci diagnostics on tty1.
+#  - xserver-xorg-core + xserver-xorg-legacy: X with permissive wrapper.
+#  - xserver-xorg-input-libinput: PS/2 + USB keyboard/mouse via libinput.
+#  - xserver-xorg-video-*: every video driver that can possibly match
+#    a Virtual{Box,VMware} or QEMU GPU - vesa is the universal fallback,
+#    fbdev hits the kernel framebuffer, modesetting drives any DRM
+#    device (including vboxvideo's drm node and vmwgfx).
+#  - xinit + matchbox-window-manager: kiosk session.
+#  - libgtk-3-0 + libwebkit2gtk-4.1-0 + libayatana-appindicator3-1
+#    + librsvg2-2 + libssl3 + fonts-dejavu-core: Tauri runtime.
+#  - locales: UTF-8.
 mmdebstrap --variant=minbase \
-  --include='linux-image-amd64,live-boot,live-boot-initramfs-tools,initramfs-tools,systemd-sysv,dbus,kbd,sudo,ca-certificates,xserver-xorg-core,xserver-xorg-legacy,xserver-xorg-input-libinput,xserver-xorg-video-fbdev,xserver-xorg-video-vesa,xserver-xorg-video-qxl,xserver-xorg-video-vmware,xserver-xorg-video-modesetting,xinit,matchbox-window-manager,libgtk-3-0,libwebkit2gtk-4.1-0,libayatana-appindicator3-1,librsvg2-2,libssl3,fonts-dejavu-core,locales' \
+  --include='linux-image-amd64,firmware-linux-free,live-boot,live-boot-initramfs-tools,initramfs-tools,systemd-sysv,dbus,kbd,sudo,procps,pciutils,ca-certificates,xserver-xorg-core,xserver-xorg-legacy,xserver-xorg-input-libinput,xserver-xorg-video-fbdev,xserver-xorg-video-vesa,xserver-xorg-video-qxl,xserver-xorg-video-vmware,xserver-xorg-video-modesetting,xinit,matchbox-window-manager,libgtk-3-0,libwebkit2gtk-4.1-0,libayatana-appindicator3-1,librsvg2-2,libssl3,fonts-dejavu-core,locales' \
   trixie chroot http://deb.debian.org/debian
 
 # 2/3/4. Install peluchinOs, autologin, kiosk session.
@@ -57,9 +76,28 @@ echo peluchinos > /etc/hostname
 echo "127.0.0.1 localhost peluchinos" > /etc/hosts
 
 dpkg -i /tmp/peluchinos.deb || true
-apt-get update >/dev/null
-apt-get install -y -f >/dev/null
+# Don't silence apt — if the .deb has an unmet dep we want the build
+# log to show exactly which package apt-get -f had to pull.
+apt-get update
+apt-get install -y -f
 rm /tmp/peluchinos.deb
+
+# Pre-load the most-likely-needed video driver modules at boot.  udev
+# normally auto-loads these from PCI alias lookup, but on some VMs the
+# alias table misses (e.g. VBoxSVGA emulating a non-canonical PCI ID)
+# and the screen stays blank because no DRM device ever appears.
+# Listing them here makes systemd-modules-load.service try each at
+# boot; failures (driver doesn't match the hardware) are silent.
+mkdir -p /etc/modules-load.d
+cat > /etc/modules-load.d/peluchinOs-video.conf <<'MODS'
+# Try every video driver that could match a VM.  Whichever matches
+# the actual emulated GPU wins; the rest fail to probe and are inert.
+vboxvideo
+vmwgfx
+qxl
+bochs
+cirrus
+MODS
 
 # Re-generate the initrd so it definitely includes live-boot's
 # /scripts/live hooks. mmdebstrap installs packages in a single batch
@@ -133,14 +171,20 @@ case "$(tty)" in
       echo "memory: $(free -h | head -2)"
       echo "rootfs source (should be /live/filesystem.squashfs):"
       mount | grep -E "on / |/live|squashfs" || echo "  WARN: no squashfs mount found"
+      echo "PCI display adapter (what the kernel sees as the GPU):"
+      lspci -nn 2>/dev/null | grep -iE "vga|display|3d" || echo "  no display PCI device"
       echo "loaded video modules:"
-      lsmod | grep -E "drm|vmware|qxl|vesa|vbox|i915|nouveau|radeon|amdgpu" || echo "  (none)"
+      lsmod 2>/dev/null | grep -E "^(drm|vmwgfx|qxl|vboxvideo|bochs|cirrus|vesafb|i915|nouveau|radeon|amdgpu)" || echo "  (none loaded — falling back to vesafb / vgacon)"
+      echo "kernel framebuffer devices:"
+      ls -l /dev/fb* 2>/dev/null || echo "  no /dev/fb* device"
       echo "DRM devices:"
       ls -l /dev/dri/ 2>/dev/null || echo "  /dev/dri does not exist"
       echo "X driver candidates available:"
       ls /usr/lib/xorg/modules/drivers/ 2>/dev/null | sort
       echo "peluchinos binary:"
       ls -l /usr/bin/peluchinos 2>/dev/null || echo "  MISSING — Tauri .deb did not install"
+      echo "last 10 lines of dmesg (recent kernel errors, if any):"
+      dmesg --color=never 2>/dev/null | tail -10 || echo "  (dmesg restricted)"
       echo "================================================================"
       echo "Switch to tty2 (Ctrl+Alt+F2) for a live journalctl follow."
       echo "Switch to tty3..tty6 for plain shells."
@@ -165,13 +209,24 @@ BP
 
 cat > /home/peluchin/.xinitrc <<'XR'
 #!/bin/sh
-# Don't blank or DPMS during a kiosk session.
+# Disable screen blanking / DPMS - kiosk session, never sleep.
 xset s off -dpms s noblank 2>/dev/null
-# Print a banner on the X root window (so the user sees SOMETHING the
-# moment X comes up, even before matchbox + peluchinos appear).
+# Paint the X root window teal IMMEDIATELY so the user sees a clear
+# transition the moment X comes up (no more "the screen is still
+# black, did X die?" ambiguity).
 xsetroot -solid '#008080' 2>/dev/null
+# Launch matchbox in the background and wait until it has registered
+# itself as the WM before exec'ing the app.  On slow VMs the previous
+# fixed `sleep 0.5` was racy - peluchinos sometimes opened before
+# matchbox claimed the root window and ended up with default decor.
 matchbox-window-manager -use_titlebar no -use_cursor yes &
-sleep 0.5
+MBPID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  sleep 0.3
+  # /tmp/.X11-unix/X0 exists once X is up; matchbox responds to
+  # X events once it's the manager.  Poll for the WM process.
+  kill -0 "$MBPID" 2>/dev/null && pgrep -x matchbox-window-manager >/dev/null && break
+done
 exec /usr/bin/peluchinos
 XR
 chmod +x /home/peluchin/.xinitrc
@@ -285,19 +340,31 @@ echo "    - Try entry (4) runlevel 3 (text-only, smaller surface)"
 echo "    - Try entry (a) serial-only (output only to COM1)"
 echo ""
 
-menuentry "1. Safe boot (visible 8s countdown before handoff)" {
+menuentry "1. Safe boot (VGA text mode, max VirtualBox compatibility)" {
     echo ""
     echo "    >>> Loading kernel  /boot/vmlinuz ..."
-    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8
+    # nomodeset:    disable KMS (no driver-mediated mode switch)
+    # nofb:         disable kernel framebuffer (no vesafb takeover that
+    #               can leave VBoxVGA showing a half-initialised buffer)
+    # vga=normal:   keep BIOS-default text mode (80x25) - what VBox
+    #               renders most reliably across all graphics adapters
+    # console=tty0 console=ttyS0,115200n8:  both VGA and serial get
+    #               every printk, so the user sees output even if their
+    #               VirtualBox display driver is stuck
+    # loglevel=7 printk.time=1:  info-level kernel messages with
+    #               timestamps - enough to see progress, not so much
+    #               that it scrolls past unreadably
+    linux /boot/vmlinuz boot=live components nomodeset nofb vga=normal console=tty0 console=ttyS0,115200n8 loglevel=7 printk.time=1
     echo "    >>> Loading initrd  /boot/initrd.img ..."
     initrd /boot/initrd.img
     echo ""
-    echo "    >>> All loaded.  The screen WILL go black when the kernel"
-    echo "    >>> takes over - that is normal.  In VirtualBox with"
-    echo "    >>> VT-x ON you should see the peluchinOs desktop within"
-    echo "    >>> 30-60 s.  Without VT-x allow 2-3 MINUTES."
+    echo "    >>> All loaded.  Kernel about to take over the console."
+    echo "    >>> You will see kernel messages scroll, then systemd,"
+    echo "    >>> then auto-login, then the peluchinOs desktop."
+    echo "    >>> In VirtualBox with VT-x ON: 30-60 s to desktop."
+    echo "    >>> Without VT-x or on slow host: 2-3 MINUTES."
     echo ""
-    echo "    >>> Booting in:"
+    echo "    >>> Booting in (press any key to abort):"
     sleep --verbose --interruptible 8
     boot
 }
