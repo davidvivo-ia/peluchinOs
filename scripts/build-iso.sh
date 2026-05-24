@@ -82,23 +82,6 @@ apt-get update
 apt-get install -y -f
 rm /tmp/peluchinos.deb
 
-# Pre-load the most-likely-needed video driver modules at boot.  udev
-# normally auto-loads these from PCI alias lookup, but on some VMs the
-# alias table misses (e.g. VBoxSVGA emulating a non-canonical PCI ID)
-# and the screen stays blank because no DRM device ever appears.
-# Listing them here makes systemd-modules-load.service try each at
-# boot; failures (driver doesn't match the hardware) are silent.
-mkdir -p /etc/modules-load.d
-cat > /etc/modules-load.d/peluchinOs-video.conf <<'MODS'
-# Try every video driver that could match a VM.  Whichever matches
-# the actual emulated GPU wins; the rest fail to probe and are inert.
-vboxvideo
-vmwgfx
-qxl
-bochs
-cirrus
-MODS
-
 # Re-generate the initrd so it definitely includes live-boot's
 # /scripts/live hooks. mmdebstrap installs packages in a single batch
 # and the initrd built during linux-image's postinst can miss hooks
@@ -343,18 +326,19 @@ echo ""
 menuentry "1. Safe boot (VGA text mode, max VirtualBox compatibility)" {
     echo ""
     echo "    >>> Loading kernel  /boot/vmlinuz ..."
+    # CONSOLE ORDER MATTERS!  The LAST `console=` becomes /dev/console,
+    # the device userspace (systemd, agetty, etc.) writes to.  If we put
+    # console=ttyS0 last, every systemd '[ OK ] Started X' line goes to
+    # the serial port and NOT to the VGA screen — the user sees kernel
+    # boot text then a black screen even though systemd is happily
+    # running.  Put tty0 LAST so userspace prints to the screen; ttyS0
+    # is still listed first and still receives all kernel printk for
+    # serial capture.
     # nomodeset:    disable KMS (no driver-mediated mode switch)
-    # nofb:         disable kernel framebuffer (no vesafb takeover that
-    #               can leave VBoxVGA showing a half-initialised buffer)
-    # vga=normal:   keep BIOS-default text mode (80x25) - what VBox
-    #               renders most reliably across all graphics adapters
-    # console=tty0 console=ttyS0,115200n8:  both VGA and serial get
-    #               every printk, so the user sees output even if their
-    #               VirtualBox display driver is stuck
-    # loglevel=7 printk.time=1:  info-level kernel messages with
-    #               timestamps - enough to see progress, not so much
-    #               that it scrolls past unreadably
-    linux /boot/vmlinuz boot=live components nomodeset nofb vga=normal console=tty0 console=ttyS0,115200n8 loglevel=7 printk.time=1
+    # nofb:         disable kernel framebuffer (no vesafb takeover)
+    # vga=normal:   keep BIOS-default 80x25 text mode
+    # loglevel=7 printk.time=1:  visible info-level kernel messages
+    linux /boot/vmlinuz boot=live components nomodeset nofb vga=normal console=ttyS0,115200n8 console=tty0 loglevel=7 printk.time=1
     echo "    >>> Loading initrd  /boot/initrd.img ..."
     initrd /boot/initrd.img
     echo ""
@@ -371,7 +355,7 @@ menuentry "1. Safe boot (VGA text mode, max VirtualBox compatibility)" {
 
 menuentry "2. Loud verbose boot  -  full kernel + live-boot debug" {
     echo ">>> Loading /boot/vmlinuz ..."
-    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 printk.time=1 systemd.log_level=info systemd.log_target=kmsg
+    linux /boot/vmlinuz boot=live components nomodeset console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 printk.time=1 systemd.log_level=info systemd.log_target=kmsg
     echo ">>> Loading /boot/initrd.img ..."
     initrd /boot/initrd.img
     echo ">>> Handing off to kernel ..."
@@ -380,13 +364,13 @@ menuentry "2. Loud verbose boot  -  full kernel + live-boot debug" {
 
 menuentry "3. Default verbose KMS  -  no nomodeset, uses real DRM driver" {
     echo ">>> Loading kernel (KMS mode) ..."
-    linux /boot/vmlinuz boot=live components console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 printk.time=1
+    linux /boot/vmlinuz boot=live components console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 printk.time=1
     initrd /boot/initrd.img
     boot
 }
 
 menuentry "4. Runlevel 3 (text console, no X)  -  smaller surface, no display switch" {
-    linux /boot/vmlinuz boot=live components 3 nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8
+    linux /boot/vmlinuz boot=live components 3 nomodeset console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8
     initrd /boot/initrd.img
     boot
 }
@@ -415,7 +399,7 @@ menuentry "7. DEBUG: break before mounting squashfs (initramfs busybox shell)" {
     echo "  blkid        - what devices live-boot can see"
     echo "  ls /run/live - what live-boot already detected"
     echo "  exit         - resume boot"
-    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 break=mountroot
+    linux /boot/vmlinuz boot=live components nomodeset console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 break=mountroot
     initrd /boot/initrd.img
     boot
 }
@@ -425,19 +409,19 @@ menuentry "8. DEBUG: break AFTER mounting squashfs (rootfs busybox shell)" {
     echo "mounted as the rootfs, but BEFORE init takes over."
     echo "  ls /run/live/medium  - the live medium"
     echo "  ls /root             - the squashfs rootfs"
-    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 break=bottom
+    linux /boot/vmlinuz boot=live components nomodeset console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 break=bottom
     initrd /boot/initrd.img
     boot
 }
 
 menuentry "9. DEBUG: break at TOP of initramfs (very first thing)" {
-    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 debug ignore_loglevel loglevel=8 break=top
+    linux /boot/vmlinuz boot=live components nomodeset console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 break=top
     initrd /boot/initrd.img
     boot
 }
 
 menuentry "a. Single-user (rescue)  -  rootfs mounted, runlevel 1, root shell" {
-    linux /boot/vmlinuz boot=live components nomodeset console=tty0 console=ttyS0,115200n8 single
+    linux /boot/vmlinuz boot=live components nomodeset console=ttyS0,115200n8 console=tty0 single
     initrd /boot/initrd.img
     boot
 }
