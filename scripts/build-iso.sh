@@ -75,10 +75,42 @@ export DEBIAN_FRONTEND=noninteractive
 echo peluchinos > /etc/hostname
 echo "127.0.0.1 localhost peluchinos" > /etc/hosts
 
+# Upgrade kernel to the newest one available in Debian sid (everything
+# else stays on trixie so the Tauri .deb's deps don't shift under us).
+# Pinning: trixie is the default for every package; sid is allowed
+# ONLY for linux-image* and firmware-linux* and their build deps so
+# the new kernel's matching firmware lines up.  Without this we'd be
+# stuck on trixie's 6.12 LTS forever.
+echo "deb http://deb.debian.org/debian sid main" > /etc/apt/sources.list.d/sid-kernel.list
+cat > /etc/apt/preferences.d/99-latest-kernel <<'PIN'
+Package: *
+Pin: release n=trixie
+Pin-Priority: 900
+
+Package: *
+Pin: release n=sid
+Pin-Priority: 1
+
+Package: linux-image-amd64 linux-image-*-amd64 linux-base linux-headers-* firmware-linux-free firmware-linux*
+Pin: release n=sid
+Pin-Priority: 990
+PIN
+apt-get update
+# `apt-get install` on already-installed packages upgrades them if the
+# pin priority of a newer version is higher than the installed one —
+# which is the case here (sid is 990, installed-from-trixie is 900).
+apt-get install -y linux-image-amd64 firmware-linux-free
+# Drop any orphan trixie kernel left behind by the upgrade so the
+# squashfs doesn't carry two complete /lib/modules/ trees.
+apt-get autoremove --purge -y
+# Sid sources/pins were a one-shot for the kernel — strip them so the
+# booted live image doesn't accidentally pull from sid at runtime.
+rm /etc/apt/sources.list.d/sid-kernel.list /etc/apt/preferences.d/99-latest-kernel
+apt-get update
+
 dpkg -i /tmp/peluchinos.deb || true
 # Don't silence apt — if the .deb has an unmet dep we want the build
 # log to show exactly which package apt-get -f had to pull.
-apt-get update
 apt-get install -y -f
 rm /tmp/peluchinos.deb
 
