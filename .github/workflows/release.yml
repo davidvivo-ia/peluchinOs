@@ -134,6 +134,52 @@ jobs:
           path: iso-build/peluchinOs-live.iso
           if-no-files-found: error
 
+      - name: Install VirtualBox CLI (for OVA generation)
+        # We only need VBoxManage — createvm + modifyvm + storageattach +
+        # export work without the vboxdrv kernel module (the module is only
+        # required to actually RUN a VM, not to package one).  The install
+        # may print warnings about being unable to load vboxdrv; ignore.
+        run: |
+          sudo apt-get install -y --no-install-recommends virtualbox
+          VBoxManage --version || true
+
+      - name: Build OVA for VirtualBox
+        # Wraps the ISO in a VirtualBox appliance with sensible defaults
+        # so the user can double-click → import → run, no settings to
+        # touch.  Display=VMSVGA + VT-x/PAE on are the exact settings
+        # peluchinOs needs to render quickly.
+        run: |
+          set -e
+          export VBOX_USER_HOME="$RUNNER_TEMP/vboxhome"
+          mkdir -p "$VBOX_USER_HOME"
+          VM="peluchinOs Live"
+          ISO="$PWD/iso-build/peluchinOs-live.iso"
+          VBoxManage createvm --name "$VM" --ostype "Debian_64" --register
+          VBoxManage modifyvm "$VM" \
+            --memory 2048 --cpus 2 \
+            --pae on --hwvirtex on \
+            --vram 32 --graphicscontroller vmsvga \
+            --audio-driver none \
+            --boot1 dvd --boot2 disk --boot3 none --boot4 none \
+            --description "peluchinOs Live - retro Windows 98-style Linux distro. ISO included; no install needed."
+          VBoxManage storagectl "$VM" --name "IDE Controller" --add ide --controller PIIX4
+          VBoxManage storageattach "$VM" \
+            --storagectl "IDE Controller" --port 0 --device 0 \
+            --type dvddrive --medium "$ISO"
+          VBoxManage export "$VM" \
+            --output iso-build/peluchinOs.ova \
+            --options manifest,iso \
+            --vsys 0 \
+            --vmname "peluchinOs Live"
+          ls -lah iso-build/peluchinOs.ova
+
+      - name: Upload OVA
+        uses: actions/upload-artifact@v4
+        with:
+          name: peluchinOs-ova
+          path: iso-build/peluchinOs.ova
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
@@ -151,6 +197,12 @@ jobs:
           name: peluchinOs-live-iso
           path: assets/
 
+      - name: Download OVA
+        uses: actions/download-artifact@v4
+        with:
+          name: peluchinOs-ova
+          path: assets/
+
       - name: Flatten assets + compute checksums
         run: |
           set -e
@@ -160,7 +212,7 @@ jobs:
           find . -type f -name '*.AppImage' -exec mv {} . \; || true
           find . -mindepth 1 -type d -empty -delete || true
           ls -la
-          sha256sum *.deb *.rpm *.AppImage *.iso > SHA256SUMS
+          sha256sum *.deb *.rpm *.AppImage *.iso *.ova > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub Release
@@ -180,7 +232,12 @@ jobs:
 
             ### 🟢 Bootable Live distribution
 
-            - **`peluchinOs-live.iso`** — hybrid BIOS/UEFI ISO, ~700 MB. Boots in
+            - **`peluchinOs.ova`** — VirtualBox appliance (~640 MB). Double-click
+              to import: VM is pre-configured with 2 GB RAM, 2 vCPUs, VMSVGA
+              display, VT-x/PAE enabled, ISO attached as DVD. Just press Start
+              and pick entry 1.
+
+            - **`peluchinOs-live.iso`** — hybrid BIOS/UEFI ISO, ~640 MB. Boots in
               QEMU/VirtualBox or on bare metal from USB. Latest Linux kernel
               from Debian sid (currently 7.x) + live-boot + autologin + Xorg +
               matchbox kiosk + peluchinOs.
@@ -212,4 +269,5 @@ jobs:
             assets/*.rpm
             assets/*.AppImage
             assets/*.iso
+            assets/*.ova
             assets/SHA256SUMS
