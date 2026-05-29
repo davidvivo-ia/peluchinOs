@@ -413,11 +413,14 @@ menuentry "1. Safe boot (VGA text mode, max VirtualBox compatibility)" {
     # running.  Put tty0 LAST so userspace prints to the screen; ttyS0
     # is still listed first and still receives all kernel printk for
     # serial capture.
-    # nomodeset:    disable KMS (no driver-mediated mode switch)
-    # nofb:         disable kernel framebuffer (no vesafb takeover)
-    # vga=normal:   keep BIOS-default 80x25 text mode
+    # gfxpayload=text:  GRUB 2.x replacement for the deprecated
+    #                   `vga=normal` kernel arg — keeps the BIOS text
+    #                   mode 80x25 active across the linux/initrd handoff.
+    # nomodeset:        disable KMS (no driver-mediated mode switch)
+    # nofb:             disable kernel framebuffer (no vesafb takeover)
     # loglevel=7 printk.time=1:  visible info-level kernel messages
-    linux /boot/vmlinuz boot=live components nomodeset nofb vga=normal console=ttyS0,115200n8 console=tty0 loglevel=7 printk.time=1
+    set gfxpayload=text
+    linux /boot/vmlinuz boot=live components nomodeset nofb console=ttyS0,115200n8 console=tty0 loglevel=7 printk.time=1
     echo "    >>> Loading initrd  /boot/initrd.img ..."
     initrd /boot/initrd.img
     echo ""
@@ -434,9 +437,10 @@ menuentry "1. Safe boot (VGA text mode, max VirtualBox compatibility)" {
 
 menuentry "2. Loud verbose boot  -  full kernel + live-boot debug (VGA-safe)" {
     echo ">>> Loading /boot/vmlinuz ..."
-    # Same VGA-text safety as entry 1 (nofb + vga=normal) so VBoxVGA-legacy
+    # Same VGA-text safety as entry 1 (gfxpayload + nofb) so VBoxVGA-legacy
     # users get verbose output AND a screen that renders, not "loud and blank".
-    linux /boot/vmlinuz boot=live components nomodeset nofb vga=normal console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 printk.time=1 systemd.log_level=info systemd.log_target=kmsg
+    set gfxpayload=text
+    linux /boot/vmlinuz boot=live components nomodeset nofb console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 printk.time=1 systemd.log_level=info systemd.log_target=kmsg
     echo ">>> Loading /boot/initrd.img ..."
     initrd /boot/initrd.img
     echo ">>> Handing off to kernel ..."
