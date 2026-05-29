@@ -120,7 +120,12 @@ jobs:
           # build-iso.sh expects exactly the path the Tauri bundler emits
 
       - name: Build Live ISO
-        run: sudo scripts/build-iso.sh
+        # SOURCE_DATE_EPOCH set from the commit's author time so SIZES.txt
+        # (and downstream artifact hashes) are stable across rebuilds of
+        # the same commit — see Reproducible Builds spec.
+        run: |
+          export SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+          sudo -E scripts/build-iso.sh
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
@@ -175,9 +180,10 @@ jobs:
 
             ### 🟢 Bootable Live distribution
 
-            - **`peluchinOs-live.iso`** — hybrid BIOS/UEFI ISO, ~400 MB. Boots in
-              QEMU/VirtualBox or on bare metal from USB. Linux 6.1 kernel +
-              live-boot + autologin + Xorg + matchbox kiosk + peluchinOs.
+            - **`peluchinOs-live.iso`** — hybrid BIOS/UEFI ISO, ~700 MB. Boots in
+              QEMU/VirtualBox or on bare metal from USB. Latest Linux kernel
+              from Debian sid (currently 7.x) + live-boot + autologin + Xorg +
+              matchbox kiosk + peluchinOs.
 
               ```
               qemu-system-x86_64 -m 2G -cdrom peluchinOs-live.iso

@@ -33,23 +33,17 @@ mkdir -p "$WORK"/{chroot,iso-root/live,iso-root/boot/grub}
 cd "$WORK"
 
 # 1. Bootstrap minimal Debian Trixie with our required userspace.
-#    Note: --include MUST be a single-line, comma-separated list — line
-#    continuations inside the single-quoted argument keep the indentation
-#    spaces as part of the package name and apt then can't resolve them.
-#    Note: live-boot-initramfs-tools is listed explicitly so the initrd
-#    that linux-image-amd64 generates at install time contains the
-#    /scripts/live/ hooks. Without that, the kernel boots fine but the
-#    initrd doesn't know how to find /live/filesystem.squashfs and the
-#    boot hangs with a blinking cursor (no kernel output, because the
-#    panic happens before userspace sets up the console).
+#    --include MUST be one line: continuations inside the single-quoted
+#    arg keep their indentation spaces as part of the package name and
+#    apt then can't resolve them.
 echo ">>> bootstrapping Debian trixie ..."
 rm -rf chroot && mkdir chroot
 # Package roll-call:
-#  - linux-image-amd64 + firmware-linux-free: kernel + the free firmware
+#  - linux-image-amd64 + firmware-linux-free: kernel + free firmware
 #    blobs every modern x86 platform asks for at probe time.
-#  - live-boot + live-boot-initramfs-tools + initramfs-tools: live ISO
-#    /scripts/live hooks in the initrd (without them the kernel boots
-#    fine and the initrd hangs - the original "blinking cursor" bug).
+#  - live-boot + live-boot-initramfs-tools + initramfs-tools: required
+#    so the initrd contains /scripts/live (otherwise the kernel boots
+#    and the initramfs has no idea how to find /live/filesystem.squashfs).
 #  - systemd-sysv: pid 1.  dbus: needed by webkit2gtk + matchbox.
 #  - kbd: console keymap.  sudo: passwordless wheel for peluchin.
 #  - procps + pciutils: for free/ps and lspci diagnostics on tty1.
@@ -72,6 +66,11 @@ echo ">>> configuring chroot ..."
 cp "$DEB" chroot/tmp/peluchinos.deb
 chroot chroot /bin/bash -e <<'EOF'
 export DEBIAN_FRONTEND=noninteractive
+# Force a sane TMPDIR.  If the host's shell exported one that doesn't
+# exist inside the chroot (e.g. /tmp/<sandbox-uuid>), package postinst
+# scripts that call mktemp die — observed with apparmor 4.x pulled in
+# as a dep of kernel 7.0 from sid.
+export TMPDIR=/tmp
 echo peluchinos > /etc/hostname
 echo "127.0.0.1 localhost peluchinos" > /etc/hosts
 
@@ -100,9 +99,42 @@ apt-get update
 # pin priority of a newer version is higher than the installed one —
 # which is the case here (sid is 990, installed-from-trixie is 900).
 apt-get install -y linux-image-amd64 firmware-linux-free
-# Drop any orphan trixie kernel left behind by the upgrade so the
-# squashfs doesn't carry two complete /lib/modules/ trees.
+# After the upgrade the linux-image-amd64 metapackage points at exactly
+# one version-specific linux-image-X.Y-amd64 (visible via apt-cache
+# depends).  That's the kernel we want to ship; purge every OTHER
+# version-specific kernel + matching modules package.
+#
+# Why not just `apt-get autoremove --purge`?  mmdebstrap installs the
+# trixie kernel's specific package as `manual` (it's a transitive dep
+# of the meta-package the user listed in --include).  `apt-mark auto`
+# on it claims success but autoremove still leaves it alone.  Explicit
+# purge by name is the only reliable path.
+WANTED_IMG="$(apt-cache depends linux-image-amd64 2>/dev/null \
+                | awk '/Depends: linux-image-[0-9]/{print $2; exit}')"
+[ -n "$WANTED_IMG" ] || { echo "ERROR: could not resolve linux-image-amd64 dep"; exit 1; }
+echo ">>> keeping kernel package: $WANTED_IMG"
+dpkg-query -W -f='${binary:Package}\n' 'linux-image-[0-9]*-amd64' 2>/dev/null | \
+  while read -r pkg; do
+    [ "$pkg" = "$WANTED_IMG" ] && continue
+    echo ">>> purging orphan kernel package: $pkg"
+    # Two independent purges: the matching linux-modules package may
+    # not exist (trixie bundled modules inside linux-image; sid splits
+    # them).  A single combined `apt-get purge $a $b` aborts entirely
+    # if EITHER package is missing — so split the calls.
+    apt-get purge -y "$pkg" || true
+    apt-get purge -y "linux-modules-${pkg#linux-image-}" 2>/dev/null || true
+  done
 apt-get autoremove --purge -y
+# Assert exactly one kernel survived.  If the explicit purge missed
+# something the squashfs would carry two complete /lib/modules/ trees
+# and our `ls vmlinuz-* | sort -V | tail -n1` selection later could
+# silently pick a different kernel from the one whose modules ship.
+NKERNELS=$(ls -1 /boot/vmlinuz-* 2>/dev/null | wc -l)
+if [ "$NKERNELS" -ne 1 ]; then
+  echo "ERROR: expected exactly 1 kernel in /boot/, got $NKERNELS"
+  ls /boot/
+  exit 1
+fi
 # Sid sources/pins were a one-shot for the kernel — strip them so the
 # booted live image doesn't accidentally pull from sid at runtime.
 rm /etc/apt/sources.list.d/sid-kernel.list /etc/apt/preferences.d/99-latest-kernel
@@ -276,29 +308,44 @@ INITRD="$(ls -1 chroot/boot/initrd.img-* | sort -V | tail -n1)"
 cp "$VMLINUZ" iso-root/boot/vmlinuz
 cp "$INITRD"  iso-root/boot/initrd.img
 
-# Build-time sanity check: verify the initrd we're about to ship
-# actually contains live-boot's scripts/live/ hooks. If it doesn't,
-# the kernel boots fine and then the boot hangs forever at a blinking
-# cursor (initramfs panics before the console is up). Fail loudly NOW
-# so we never publish another broken ISO with this exact symptom.
+# Build-time sanity check: the initrd we're about to ship must contain
+# live-boot's scripts/live/ hooks, otherwise the kernel boots and the
+# initramfs panics with no way to find the squashfs.  Capture lsinitramfs's
+# stderr separately so a tool-level failure (renamed kernel, missing
+# lsinitramfs, etc.) is diagnosable instead of silent.
 echo ">>> verifying initrd contains live-boot scripts ..."
-INITRD_LIST="$(chroot chroot lsinitramfs /boot/$(basename "$INITRD") 2>/dev/null || true)"
+INITRD_NAME="$(basename "$INITRD")"
+INITRD_LIST="$(chroot chroot lsinitramfs "/boot/$INITRD_NAME" 2>/tmp/lsinitramfs.err || true)"
 if ! echo "$INITRD_LIST" | grep -q 'scripts/live'; then
-  echo "ERROR: initrd $INITRD has no scripts/live/ entries."
-  echo "       live-boot hooks did not make it into the initramfs."
+  echo "ERROR: /boot/$INITRD_NAME has no scripts/live/ entries — live-boot"
+  echo "       hooks did not make it into the initramfs."
+  if [ -s /tmp/lsinitramfs.err ]; then
+    echo "       lsinitramfs stderr:"
+    sed 's/^/         /' /tmp/lsinitramfs.err
+  fi
   echo "       First 40 entries of the initrd were:"
   echo "$INITRD_LIST" | head -40
   exit 1
 fi
 echo "    OK ($(echo "$INITRD_LIST" | grep -c scripts/live) live-boot files in initrd)"
 
-# Embed a sizes file so we can confirm from GRUB which kernel/initrd
-# were actually published (cat (cd0)/boot/SIZES.txt in the GRUB
-# command line).
+# Embed a sizes file so the GRUB "cat /boot/SIZES.txt" entry can prove
+# which kernel/initrd were actually published.
+# Use the commit hash (or SOURCE_DATE_EPOCH if exported) instead of
+# `date -u` so two builds of the same commit produce the same SIZES.txt
+# — wall-clock timestamps were the main thing pushing the ISO SHA256
+# around between identical-code rebuilds.
+SHORT_SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo local)"
+if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then
+  BUILT="$(date -u -d "@$SOURCE_DATE_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')"
+else
+  BUILT="commit-$SHORT_SHA"
+fi
 {
   echo "kernel:  $(basename "$VMLINUZ")  $(stat -c '%s bytes' "$VMLINUZ")"
   echo "initrd:  $(basename "$INITRD")   $(stat -c '%s bytes' "$INITRD")"
-  echo "built:   $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  echo "commit:  $SHORT_SHA"
+  echo "built:   $BUILT"
 } > iso-root/boot/SIZES.txt
 
 # grub.cfg, DEBUG BUILD. Each entry prints what it does at GRUB level
@@ -385,9 +432,11 @@ menuentry "1. Safe boot (VGA text mode, max VirtualBox compatibility)" {
     boot
 }
 
-menuentry "2. Loud verbose boot  -  full kernel + live-boot debug" {
+menuentry "2. Loud verbose boot  -  full kernel + live-boot debug (VGA-safe)" {
     echo ">>> Loading /boot/vmlinuz ..."
-    linux /boot/vmlinuz boot=live components nomodeset console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 printk.time=1 systemd.log_level=info systemd.log_target=kmsg
+    # Same VGA-text safety as entry 1 (nofb + vga=normal) so VBoxVGA-legacy
+    # users get verbose output AND a screen that renders, not "loud and blank".
+    linux /boot/vmlinuz boot=live components nomodeset nofb vga=normal console=ttyS0,115200n8 console=tty0 debug ignore_loglevel loglevel=8 printk.time=1 systemd.log_level=info systemd.log_target=kmsg
     echo ">>> Loading /boot/initrd.img ..."
     initrd /boot/initrd.img
     echo ">>> Handing off to kernel ..."
@@ -418,7 +467,9 @@ menuentry "5. Serial-only boot  -  console ONLY on COM1, NO video output expecte
 }
 
 menuentry "6. Quiet splash  -  normal boot once ISO is known good" {
-    linux /boot/vmlinuz boot=live components quiet splash
+    # quiet+splash only suppresses VGA verbosity; keep the serial port
+    # going so a panic here is still capturable from VBox's Raw File.
+    linux /boot/vmlinuz boot=live components quiet splash console=ttyS0,115200n8 console=tty0
     initrd /boot/initrd.img
     boot
 }
@@ -461,8 +512,19 @@ menuentry "a. Single-user (rescue)  -  rootfs mounted, runlevel 1, root shell" {
 menuentry "b. GRUB cat  -  show /boot/SIZES.txt and stay in GRUB" {
     cat /boot/SIZES.txt
     echo ""
-    echo "Press Esc to return to the menu."
-    sleep -i 600
+    echo "Press Enter to return to the menu."
+    # `read` blocks until Enter — `sleep -i 600` (previous code) auto-
+    # continued after 10 min and the default entry would then boot.
+    read _dummy
+}
+
+menuentry "c. Boot from first hard drive (chainload MBR)" {
+    # Standard live-ISO convention.  If you booted the ISO in a VM that
+    # already has an OS installed, pick this to chainload the local disk
+    # instead of going into peluchinOs.  Returns to this menu on failure.
+    set root=(hd0)
+    chainloader +1
+    boot
 }
 GRUB
 
@@ -475,5 +537,14 @@ mksquashfs chroot iso-root/live/filesystem.squashfs \
   -noappend -comp lz4 -e boot
 grub-mkrescue -o peluchinOs-live.iso iso-root/
 
-ls -lah peluchinOs-live.iso
+# Final summary — useful in CI logs and for quick "did the bytes change?"
+# checks when iterating on the script.
+echo ""
+echo "=== build summary ==="
+echo "kernel:  $(basename "$VMLINUZ")"
+echo "initrd:  $(basename "$INITRD")"
+echo "commit:  $SHORT_SHA"
+echo "iso:     peluchinOs-live.iso $(du -h peluchinOs-live.iso | cut -f1)"
+echo "sha256:  $(sha256sum peluchinOs-live.iso | cut -d' ' -f1)"
+echo ""
 echo ">>> done. Run with:  qemu-system-x86_64 -m 2G -cdrom $WORK/peluchinOs-live.iso"
