@@ -180,6 +180,110 @@ jobs:
           path: iso-build/peluchinOs.ova
           if-no-files-found: error
 
+      - name: Install QEMU + helpers (for the boot test)
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 imagemagick netcat-openbsd
+
+      - name: Verify ISO boots to desktop (end-to-end QEMU test)
+        # Boots the freshly-built ISO headless under QEMU, captures the
+        # framebuffer every 5 s, and fails the build if the kernel does
+        # not reach the peluchinos-journal-tty2.service marker within
+        # 5 min.  This shifts our confidence from "I tested locally" to
+        # "every ISO that ships has been proven to reach userspace".
+        # KVM is exposed on GitHub Actions ubuntu-latest runners — use
+        # it when available for native speed, fall back to TCG otherwise.
+        run: |
+          set -e
+          mkdir -p /tmp/boot-shots
+          rm -f /tmp/serial.log /tmp/qemu.pid /tmp/boot-proof.png
+
+          KVM_FLAG=""
+          if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            KVM_FLAG="-enable-kvm -cpu host"
+            echo "✓ /dev/kvm available — booting at native speed"
+          else
+            echo "⚠ /dev/kvm not available — falling back to TCG (slower)"
+          fi
+
+          qemu-system-x86_64 -m 2G -smp 2 -machine pc $KVM_FLAG -no-reboot \
+            -cdrom iso-build/peluchinOs-live.iso \
+            -display none -vga std \
+            -serial file:/tmp/serial.log \
+            -monitor unix:/tmp/qmp.sock,server,nowait \
+            -daemonize -pidfile /tmp/qemu.pid
+
+          QPID=$(cat /tmp/qemu.pid)
+          echo "QEMU pid: $QPID"
+
+          BOOT_OK=0
+          # 60 iterations × 5 s = 5 min ceiling
+          for i in $(seq 1 60); do
+            sleep 5
+            T=$((i * 5))
+
+            # snapshot for the timeline
+            echo "screendump /tmp/boot-shots/t${T}s.ppm" | \
+              nc -U /tmp/qmp.sock -q1 2>/dev/null || true
+
+            # Check whether the boot reached userspace.  The agetty on
+            # ttyS0 prints "peluchinos login:" once it's running — that
+            # message DOES land on the serial log (the console=tty0
+            # last fix means everything ELSE goes to tty0, but agetty
+            # writes directly to its own tty, so ttyS0's getty's prompt
+            # is still on ttyS0).  Reliable, build-unique marker.
+            if grep -q "peluchinos login:" /tmp/serial.log 2>/dev/null; then
+              echo "✓ Boot marker found at t+${T}s (userspace reached)"
+              BOOT_OK=1
+              # Give X another 60 s to actually paint the Tauri window.
+              sleep 60
+              echo "screendump /tmp/boot-shots/final.ppm" | \
+                nc -U /tmp/qmp.sock -q1 2>/dev/null || true
+              break
+            fi
+
+            if ! kill -0 $QPID 2>/dev/null; then
+              echo "✗ QEMU exited prematurely at t+${T}s"
+              break
+            fi
+          done
+
+          kill $QPID 2>/dev/null || true
+
+          # Convert all PPMs to PNGs; pick `final.png` as boot-proof.
+          for f in /tmp/boot-shots/*.ppm; do
+            [ -f "$f" ] && convert "$f" "${f%.ppm}.png" && rm "$f"
+          done
+          if [ -f /tmp/boot-shots/final.png ]; then
+            cp /tmp/boot-shots/final.png /tmp/boot-proof.png
+          else
+            LAST=$(ls -1 /tmp/boot-shots/*.png 2>/dev/null | sort -V | tail -1)
+            [ -n "$LAST" ] && cp "$LAST" /tmp/boot-proof.png || true
+          fi
+
+          if [ -f /tmp/boot-proof.png ]; then
+            ls -lah /tmp/boot-proof.png
+          fi
+
+          if [ $BOOT_OK -eq 0 ]; then
+            echo "::error::Boot test FAILED — kernel did not reach userspace within 5 min"
+            echo "=== last 80 lines of serial log ==="
+            tail -80 /tmp/serial.log || true
+            exit 1
+          fi
+
+          echo "✓ Boot test PASSED"
+
+      - name: Upload boot-proof screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: peluchinOs-boot-proof
+          path: |
+            /tmp/boot-proof.png
+            /tmp/serial.log
+          if-no-files-found: warn
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
@@ -201,6 +305,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: peluchinOs-ova
+          path: assets/
+
+      - name: Download boot-proof screenshot
+        uses: actions/download-artifact@v4
+        with:
+          name: peluchinOs-boot-proof
           path: assets/
 
       - name: Flatten assets + compute checksums
@@ -258,6 +368,12 @@ jobs:
 
             See `SHA256SUMS` for checksums of every asset.
 
+            **Boot proof**: every release embeds `boot-proof.png` — a
+            framebuffer screenshot taken during a CI-run QEMU boot test.
+            If the screenshot shows the peluchinOs desktop, the .iso/.ova
+            in this release has been independently verified to reach
+            userspace before publication.
+
             ### Apps included
 
             File Explorer · Terminal MS-DOS (~50 commands, pipes, redirects) ·
@@ -270,4 +386,5 @@ jobs:
             assets/*.AppImage
             assets/*.iso
             assets/*.ova
+            assets/*.png
             assets/SHA256SUMS

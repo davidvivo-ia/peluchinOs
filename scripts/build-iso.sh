@@ -206,6 +206,32 @@ allowed_users=anybody
 needs_root_rights=yes
 CFG
 
+# Xorg fallback Device section.  With `nomodeset` (entries 1/2) no DRM
+# device is created, so X auto-config sometimes concludes "no display
+# devices detected" and exits.  This Device section is loaded by X
+# only when nothing else has matched — it's a Device-only stanza, no
+# Screen or ServerLayout, so it doesn't force the driver when better
+# auto-detection options exist.  vesa works on EVERY VGA-compatible
+# card peluchinOs could land on (VBoxVGA legacy, VBoxSVGA, VMSVGA,
+# QEMU stdvga, real bare-metal hardware).
+mkdir -p /etc/X11/xorg.conf.d
+cat > /etc/X11/xorg.conf.d/10-peluchinos-fallback.conf <<'XCONF'
+Section "Device"
+    Identifier "peluchinOs vesa fallback"
+    Driver "vesa"
+EndSection
+XCONF
+# Allow X autoconfigure to start without any input device too.  In a
+# headless boot test (CI), there might not be a synthetic mouse/keyboard
+# yet when X starts; AllowEmptyInput=true keeps X from refusing to run.
+cat > /etc/X11/xorg.conf.d/20-peluchinos-server-flags.conf <<'XCONF'
+Section "ServerFlags"
+    Option "AllowEmptyInput" "true"
+    Option "AutoAddDevices" "true"
+    Option "DontVTSwitch" "false"
+EndSection
+XCONF
+
 cat > /home/peluchin/.bash_profile <<'BP'
 case "$(tty)" in
   /dev/tty1)
