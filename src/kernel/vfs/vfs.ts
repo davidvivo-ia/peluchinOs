@@ -1,16 +1,38 @@
 import { createLogger } from '../logger'
-import { db } from './db'
+import { db, swapToMemoryBackend } from './db'
 import { ROOT, basename, dirname, normalize } from './paths'
 import type { DirEntry, Stat, VNode, VfsEvent, VfsListener } from './types'
 import { VfsError } from './types'
 
 const log = createLogger('vfs')
 
+const OPEN_TIMEOUT_MS = 5000
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${what} timed out after ${ms}ms`)), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timeoutId)) as Promise<T>
+}
+
 class Vfs {
   private listeners = new Set<VfsListener>()
 
   async init(): Promise<void> {
-    await db.open()
+    // WebKitGTK's IndexedDB can hang `open()` indefinitely on some live
+    // ISO storage stacks (overlayfs root). Race it against a timeout and
+    // fall back to the in-memory backend so the desktop ALWAYS gets a
+    // working filesystem — persistence is ephemeral on a live image
+    // anyway, so the fallback is behaviourally identical there.
+    try {
+      await withTimeout(db.open(), OPEN_TIMEOUT_MS, 'IndexedDB open')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      log.warn(`IndexedDB unusable (${msg}) — switching to in-memory VFS backend`)
+      await swapToMemoryBackend()
+      await db.open()
+    }
     const rootStat = await db.nodes.where('path').equals(ROOT).first()
     if (!rootStat) {
       const now = Date.now()

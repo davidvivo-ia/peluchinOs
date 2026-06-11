@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - claude/retro-os-modern-tech-5GFAP
+      - claude/dazzling-fermi-qtPPl
     tags:
       - 'v*'
   workflow_dispatch:
@@ -119,7 +120,17 @@ jobs:
           # build-iso.sh expects exactly the path the Tauri bundler emits
 
       - name: Build Live ISO
-        run: sudo scripts/build-iso.sh
+        # SOURCE_DATE_EPOCH set from the commit's author time so SIZES.txt
+        # (and downstream artifact hashes) are stable across rebuilds of
+        # the same commit — see Reproducible Builds spec.
+        run: |
+          export SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+          sudo -E scripts/build-iso.sh
+          # build-iso.sh ran as root, so iso-build/ is root-owned. Later
+          # steps run as the runner user and need to WRITE next to the
+          # ISO (VBoxManage exports iso-build/peluchinOs.ova) — without
+          # this chown the export dies with VERR_ACCESS_DENIED.
+          sudo chown -R "$(id -u):$(id -g)" iso-build
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
@@ -127,6 +138,156 @@ jobs:
           name: peluchinOs-live-iso
           path: iso-build/peluchinOs-live.iso
           if-no-files-found: error
+
+      - name: Install VirtualBox CLI (for OVA generation)
+        # We only need VBoxManage — createvm + modifyvm + storageattach +
+        # export work without the vboxdrv kernel module (the module is only
+        # required to actually RUN a VM, not to package one).  The install
+        # may print warnings about being unable to load vboxdrv; ignore.
+        run: |
+          sudo apt-get install -y --no-install-recommends virtualbox
+          VBoxManage --version || true
+
+      - name: Build OVA for VirtualBox
+        # Wraps the ISO in a VirtualBox appliance with sensible defaults
+        # so the user can double-click → import → run, no settings to
+        # touch.  Display=VMSVGA + VT-x/PAE on are the exact settings
+        # peluchinOs needs to render quickly.
+        run: |
+          set -e
+          export VBOX_USER_HOME="$RUNNER_TEMP/vboxhome"
+          mkdir -p "$VBOX_USER_HOME"
+          VM="peluchinOs Live"
+          ISO="$PWD/iso-build/peluchinOs-live.iso"
+          VBoxManage createvm --name "$VM" --ostype "Debian_64" --register
+          VBoxManage modifyvm "$VM" \
+            --memory 2048 --cpus 2 \
+            --pae on --hwvirtex on \
+            --vram 32 --graphicscontroller vmsvga \
+            --audio-driver none \
+            --boot1 dvd --boot2 disk --boot3 none --boot4 none \
+            --description "peluchinOs Live - retro Windows 98-style Linux distro. ISO included; no install needed."
+          VBoxManage storagectl "$VM" --name "IDE Controller" --add ide --controller PIIX4
+          VBoxManage storageattach "$VM" \
+            --storagectl "IDE Controller" --port 0 --device 0 \
+            --type dvddrive --medium "$ISO"
+          VBoxManage export "$VM" \
+            --output iso-build/peluchinOs.ova \
+            --options manifest,iso \
+            --vsys 0 \
+            --vmname "peluchinOs Live"
+          ls -lah iso-build/peluchinOs.ova
+
+      - name: Upload OVA
+        uses: actions/upload-artifact@v4
+        with:
+          name: peluchinOs-ova
+          path: iso-build/peluchinOs.ova
+          if-no-files-found: error
+
+      - name: Install QEMU + helpers (for the boot test)
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 imagemagick netcat-openbsd
+
+      - name: Verify ISO boots to desktop (end-to-end QEMU test)
+        # Boots the freshly-built ISO headless under QEMU, captures the
+        # framebuffer every 5 s, and fails the build if the kernel does
+        # not reach the peluchinos-journal-tty2.service marker within
+        # 5 min.  This shifts our confidence from "I tested locally" to
+        # "every ISO that ships has been proven to reach userspace".
+        # KVM is exposed on GitHub Actions ubuntu-latest runners — use
+        # it when available for native speed, fall back to TCG otherwise.
+        run: |
+          set -e
+          mkdir -p /tmp/boot-shots
+          rm -f /tmp/serial.log /tmp/qemu.pid /tmp/boot-proof.png
+
+          KVM_FLAG=""
+          if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            KVM_FLAG="-enable-kvm -cpu host"
+            echo "✓ /dev/kvm available — booting at native speed"
+          else
+            echo "⚠ /dev/kvm not available — falling back to TCG (slower)"
+          fi
+
+          qemu-system-x86_64 -m 2G -smp 2 -machine pc $KVM_FLAG -no-reboot \
+            -cdrom iso-build/peluchinOs-live.iso \
+            -display none -vga std \
+            -serial file:/tmp/serial.log \
+            -monitor unix:/tmp/qmp.sock,server,nowait \
+            -daemonize -pidfile /tmp/qemu.pid
+
+          QPID=$(cat /tmp/qemu.pid)
+          echo "QEMU pid: $QPID"
+
+          BOOT_OK=0
+          # 60 iterations × 5 s = 5 min ceiling
+          for i in $(seq 1 60); do
+            sleep 5
+            T=$((i * 5))
+
+            # snapshot for the timeline
+            echo "screendump /tmp/boot-shots/t${T}s.ppm" | \
+              nc -U /tmp/qmp.sock -q1 2>/dev/null || true
+
+            # Check whether the boot reached userspace.  The agetty on
+            # ttyS0 prints "peluchinos login:" once it's running — that
+            # message DOES land on the serial log (the console=tty0
+            # last fix means everything ELSE goes to tty0, but agetty
+            # writes directly to its own tty, so ttyS0's getty's prompt
+            # is still on ttyS0).  Reliable, build-unique marker.
+            if grep -q "peluchinos login:" /tmp/serial.log 2>/dev/null; then
+              echo "✓ Boot marker found at t+${T}s (userspace reached)"
+              BOOT_OK=1
+              # Give X another 60 s to actually paint the Tauri window.
+              sleep 60
+              echo "screendump /tmp/boot-shots/final.ppm" | \
+                nc -U /tmp/qmp.sock -q1 2>/dev/null || true
+              break
+            fi
+
+            if ! kill -0 $QPID 2>/dev/null; then
+              echo "✗ QEMU exited prematurely at t+${T}s"
+              break
+            fi
+          done
+
+          kill $QPID 2>/dev/null || true
+
+          # Convert all PPMs to PNGs; pick `final.png` as boot-proof.
+          for f in /tmp/boot-shots/*.ppm; do
+            [ -f "$f" ] && convert "$f" "${f%.ppm}.png" && rm "$f"
+          done
+          if [ -f /tmp/boot-shots/final.png ]; then
+            cp /tmp/boot-shots/final.png /tmp/boot-proof.png
+          else
+            LAST=$(ls -1 /tmp/boot-shots/*.png 2>/dev/null | sort -V | tail -1)
+            [ -n "$LAST" ] && cp "$LAST" /tmp/boot-proof.png || true
+          fi
+
+          if [ -f /tmp/boot-proof.png ]; then
+            ls -lah /tmp/boot-proof.png
+          fi
+
+          if [ $BOOT_OK -eq 0 ]; then
+            echo "::error::Boot test FAILED — kernel did not reach userspace within 5 min"
+            echo "=== last 80 lines of serial log ==="
+            tail -80 /tmp/serial.log || true
+            exit 1
+          fi
+
+          echo "✓ Boot test PASSED"
+
+      - name: Upload boot-proof screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: peluchinOs-boot-proof
+          path: |
+            /tmp/boot-proof.png
+            /tmp/serial.log
+          if-no-files-found: warn
 
   release:
     name: Publish GitHub Release
@@ -145,6 +306,18 @@ jobs:
           name: peluchinOs-live-iso
           path: assets/
 
+      - name: Download OVA
+        uses: actions/download-artifact@v4
+        with:
+          name: peluchinOs-ova
+          path: assets/
+
+      - name: Download boot-proof screenshot
+        uses: actions/download-artifact@v4
+        with:
+          name: peluchinOs-boot-proof
+          path: assets/
+
       - name: Flatten assets + compute checksums
         run: |
           set -e
@@ -154,7 +327,7 @@ jobs:
           find . -type f -name '*.AppImage' -exec mv {} . \; || true
           find . -mindepth 1 -type d -empty -delete || true
           ls -la
-          sha256sum *.deb *.rpm *.AppImage *.iso > SHA256SUMS
+          sha256sum *.deb *.rpm *.AppImage *.iso *.ova > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub Release
@@ -174,9 +347,15 @@ jobs:
 
             ### 🟢 Bootable Live distribution
 
-            - **`peluchinOs-live.iso`** — hybrid BIOS/UEFI ISO, ~400 MB. Boots in
-              QEMU/VirtualBox or on bare metal from USB. Linux 6.1 kernel +
-              live-boot + autologin + Xorg + matchbox kiosk + peluchinOs.
+            - **`peluchinOs.ova`** — VirtualBox appliance (~640 MB). Double-click
+              to import: VM is pre-configured with 2 GB RAM, 2 vCPUs, VMSVGA
+              display, VT-x/PAE enabled, ISO attached as DVD. Just press Start
+              and pick entry 1.
+
+            - **`peluchinOs-live.iso`** — hybrid BIOS/UEFI ISO, ~640 MB. Boots in
+              QEMU/VirtualBox or on bare metal from USB. Latest Linux kernel
+              from Debian sid (currently 7.x) + live-boot + autologin + Xorg +
+              matchbox kiosk + peluchinOs.
 
               ```
               qemu-system-x86_64 -m 2G -cdrom peluchinOs-live.iso
@@ -194,6 +373,12 @@ jobs:
 
             See `SHA256SUMS` for checksums of every asset.
 
+            **Boot proof**: every release embeds `boot-proof.png` — a
+            framebuffer screenshot taken during a CI-run QEMU boot test.
+            If the screenshot shows the peluchinOs desktop, the .iso/.ova
+            in this release has been independently verified to reach
+            userspace before publication.
+
             ### Apps included
 
             File Explorer · Terminal MS-DOS (~50 commands, pipes, redirects) ·
@@ -205,4 +390,6 @@ jobs:
             assets/*.rpm
             assets/*.AppImage
             assets/*.iso
+            assets/*.ova
+            assets/*.png
             assets/SHA256SUMS

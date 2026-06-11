@@ -112,7 +112,10 @@ export async function execute(
     }
 
     if (result.exitCode !== 0 && !isLast) {
+      // Standard shell semantics: a failing command mid-pipeline kills
+      // the rest of the pipeline (its stderr lines are already queued).
       log.debug(`pipeline aborted at command ${idx}`, { exitCode: result.exitCode })
+      return out
     }
   }
 

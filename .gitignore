@@ -16,6 +16,4 @@ src-tauri/gen
 playwright-report
 test-results
 coverage
-iso-build/chroot
-iso-build/iso-root
-iso-build/*.iso
+iso-build/

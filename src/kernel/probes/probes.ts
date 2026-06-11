@@ -4,12 +4,28 @@ import { bootstrapFilesystem, vfs } from '@/kernel/vfs'
 import { useWMStore } from '@/kernel/window-manager'
 import type { Probe, ProbeResult } from './types'
 
+// Hard ceiling per probe. IndexedDB on WebKitGTK over an overlayfs root
+// (exactly what the live ISO runs on) is known to hang `open()` forever
+// in some configurations — without this race the boot screen would
+// never complete. A probe that overruns is reported as failed and boot
+// carries on.
+const PROBE_TIMEOUT_MS = 8000
+
 export async function runProbe(probe: Probe): Promise<ProbeResult> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<ProbeResult>((resolve) => {
+    timeoutId = setTimeout(
+      () => resolve({ status: 'failed', detail: `probe timed out after ${PROBE_TIMEOUT_MS}ms` }),
+      PROBE_TIMEOUT_MS,
+    )
+  })
   try {
-    return await probe.run()
+    return await Promise.race([Promise.resolve(probe.run()), timeout])
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return { status: 'failed', detail: msg || 'unknown error' }
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 
