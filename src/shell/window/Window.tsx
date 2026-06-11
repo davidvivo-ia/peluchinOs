@@ -1,6 +1,6 @@
 import { useWMStore } from '@/kernel/window-manager'
 import type { Position, Size, WindowState } from '@/kernel/window-manager'
-import { type CSSProperties, type ReactNode, useCallback } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef } from 'react'
 
 const TASKBAR_HEIGHT = 28
 
@@ -144,7 +144,23 @@ function TitleButton({
   )
 }
 
+// Both gesture hooks register document-level listeners that normally
+// detach on mouseup. If the window unmounts MID-gesture (app closed via
+// keyboard shortcut, taskbar, etc.) mouseup never reaches the handler —
+// the unmount cleanup below covers that path so listeners can't leak.
+function useGestureCleanup() {
+  const cleanupRef = useRef<(() => void) | null>(null)
+  useEffect(
+    () => () => {
+      cleanupRef.current?.()
+    },
+    [],
+  )
+  return cleanupRef
+}
+
 function useStartDrag(w: WindowState, move: (id: string, p: Position) => void) {
+  const cleanupRef = useGestureCleanup()
   return (e: React.MouseEvent) => {
     if (e.button !== 0) return
     e.preventDefault()
@@ -157,16 +173,19 @@ function useStartDrag(w: WindowState, move: (id: string, p: Position) => void) {
       const y = Math.max(0, origY + (ev.clientY - startY))
       move(w.id, { x, y })
     }
-    const onUp = () => {
+    const cleanup = () => {
       document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('mouseup', cleanup)
+      cleanupRef.current = null
     }
     document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    document.addEventListener('mouseup', cleanup)
+    cleanupRef.current = cleanup
   }
 }
 
 function useStartResize(w: WindowState, resize: (id: string, s: Size) => void) {
+  const cleanupRef = useGestureCleanup()
   return (e: React.MouseEvent) => {
     if (e.button !== 0) return
     e.stopPropagation()
@@ -181,11 +200,13 @@ function useStartResize(w: WindowState, resize: (id: string, s: Size) => void) {
       const height = Math.max(min.height, startH + (ev.clientY - startY))
       resize(w.id, { width, height })
     }
-    const onUp = () => {
+    const cleanup = () => {
       document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('mouseup', cleanup)
+      cleanupRef.current = null
     }
     document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    document.addEventListener('mouseup', cleanup)
+    cleanupRef.current = cleanup
   }
 }

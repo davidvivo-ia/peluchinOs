@@ -186,6 +186,10 @@ export function BootScreen({ onComplete }: BootScreenProps) {
     run().catch((e) => {
       const msg = e instanceof Error ? e.message : String(e)
       log.error(`boot sequence crashed: ${msg}`)
+      // Fail open: a crashed boot animation must never strand the user
+      // on the boot screen. Whatever subsystem broke will surface its
+      // own errors once the desktop is up.
+      if (!cancelled) onCompleteRef.current()
     })
 
     return () => {
