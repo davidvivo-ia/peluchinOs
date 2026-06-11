@@ -126,6 +126,11 @@ jobs:
         run: |
           export SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
           sudo -E scripts/build-iso.sh
+          # build-iso.sh ran as root, so iso-build/ is root-owned. Later
+          # steps run as the runner user and need to WRITE next to the
+          # ISO (VBoxManage exports iso-build/peluchinOs.ova) — without
+          # this chown the export dies with VERR_ACCESS_DENIED.
+          sudo chown -R "$(id -u):$(id -g)" iso-build
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
