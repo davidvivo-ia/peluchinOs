@@ -42,7 +42,7 @@ mmdebstrap --variant=minbase \
             xserver-xorg-input-libinput,xserver-xorg-video-fbdev,
             xserver-xorg-video-vesa,xserver-xorg-video-qxl,
             xserver-xorg-video-vmware,xserver-xorg-video-modesetting,
-            xinit,matchbox-window-manager,libgtk-3-0,
+            xinit,x11-xserver-utils,matchbox-window-manager,libgtk-3-0,
             libwebkit2gtk-4.1-0,libayatana-appindicator3-1,librsvg2-2,
             libssl3,fonts-dejavu-core,locales' \
   trixie chroot http://deb.debian.org/debian
@@ -99,6 +99,9 @@ cat > /home/peluchin/.xinitrc <<'XR'
 #!/bin/sh
 # Don't blank or DPMS during a kiosk session.
 xset s off -dpms s noblank 2>/dev/null
+# Paint the teal wallpaper immediately so the 5-15 s webkit startup
+# doesn't look like a frozen black screen.
+xsetroot -solid '#008080' 2>/dev/null
 matchbox-window-manager -use_titlebar no -use_cursor yes &
 sleep 0.5
 exec /usr/bin/peluchinos
@@ -143,26 +146,25 @@ fi
 set color_normal=light-gray/black
 set color_highlight=black/cyan
 
-cat <<'BANNER'
-   peluchinOs 0.0.1-fluffy — Linux 6.1 — Live ISO
-   ────────────────────────────────────────────────────────
-   Boot will start in 30 s. Use ↑/↓ + Enter to choose.
-BANNER
+echo ""
+echo "   peluchinOs 0.0.1-fluffy - Linux 6.1 - Live ISO"
+echo "   Boot starts in 30 s. Use up/down + Enter to choose."
+echo ""
 
-menuentry "peluchinOs Live (verbose boot)" {
-    linux /boot/vmlinuz boot=live components nomodeset
+menuentry "peluchinOs Live (universal - any GPU)" {
+    linux /boot/vmlinuz boot=live components vga=788 console=tty1
     initrd /boot/initrd.img
 }
-menuentry "peluchinOs Live (default verbose)" {
-    linux /boot/vmlinuz boot=live components
+menuentry "peluchinOs Live (KMS accelerated - VMSVGA/QEMU)" {
+    linux /boot/vmlinuz boot=live components console=tty1
     initrd /boot/initrd.img
 }
-menuentry "peluchinOs Live (quiet splash)" {
-    linux /boot/vmlinuz boot=live components quiet splash
+menuentry "peluchinOs Live (nomodeset fallback)" {
+    linux /boot/vmlinuz boot=live components nomodeset vga=791 console=tty1
     initrd /boot/initrd.img
 }
-menuentry "peluchinOs Live (safe — text console only)" {
-    linux /boot/vmlinuz boot=live components 3 nomodeset
+menuentry "peluchinOs Live (text console rescue)" {
+    linux /boot/vmlinuz boot=live components 3 vga=normal
     initrd /boot/initrd.img
 }
 GRUB
