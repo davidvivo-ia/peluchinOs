@@ -104,7 +104,8 @@ jobs:
             grub-pc-bin \
             grub-efi-amd64-bin \
             mtools \
-            debian-archive-keyring
+            debian-archive-keyring \
+            qemu-utils
 
       - name: Download Tauri bundles
         uses: actions/download-artifact@v4
@@ -112,20 +113,19 @@ jobs:
           name: tauri-bundles
           path: src-tauri/target/release/bundle/
 
-      - name: Move .deb to expected path
-        run: |
-          set -e
-          ls -la src-tauri/target/release/bundle/deb/
-          # build-iso.sh expects exactly the path the Tauri bundler emits
-
       - name: Build Live ISO
         run: sudo scripts/build-iso.sh
 
-      - name: Upload ISO
+      - name: Build OVA (VirtualBox / VMware appliance)
+        run: sudo scripts/build-ova.sh
+
+      - name: Upload ISO + OVA
         uses: actions/upload-artifact@v4
         with:
-          name: peluchinOs-live-iso
-          path: iso-build/peluchinOs-live.iso
+          name: peluchinOs-images
+          path: |
+            iso-build/peluchinOs-live.iso
+            iso-build/peluchinOs.ova
           if-no-files-found: error
 
   release:
@@ -139,10 +139,10 @@ jobs:
           name: tauri-bundles
           path: assets/
 
-      - name: Download ISO
+      - name: Download ISO + OVA
         uses: actions/download-artifact@v4
         with:
-          name: peluchinOs-live-iso
+          name: peluchinOs-images
           path: assets/
 
       - name: Flatten assets + compute checksums
@@ -154,7 +154,7 @@ jobs:
           find . -type f -name '*.AppImage' -exec mv {} . \; || true
           find . -mindepth 1 -type d -empty -delete || true
           ls -la
-          sha256sum *.deb *.rpm *.AppImage *.iso > SHA256SUMS
+          sha256sum *.deb *.rpm *.AppImage *.iso *.ova > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub Release
@@ -187,6 +187,11 @@ jobs:
               sudo dd if=peluchinOs-live.iso of=/dev/sdX bs=4M conv=fsync status=progress
               ```
 
+            - **`peluchinOs.ova`** — pre-configured VirtualBox/VMware appliance.
+              File → Import Appliance, then just Start. Ships with 2 GB RAM,
+              2 vCPU, VMSVGA and a SATA disk already set — no fiddling with
+              graphics or boot order.
+
             ### 🖥️ Native desktop installers (install over your existing OS)
 
             - **`peluchinOs_*.deb`** — Debian/Ubuntu installer (~1.6 MB)
@@ -208,6 +213,7 @@ jobs:
             assets/*.rpm
             assets/*.AppImage
             assets/*.iso
+            assets/*.ova
             assets/SHA256SUMS
 
       - name: Delete old v0.0.1 release and tag

@@ -54,9 +54,19 @@ sudo dd if=peluchinOs-live.iso of=/dev/sdX bs=4M conv=fsync status=progress
 uses a universal VESA mode. VMSVGA with 128 MB video memory gives the best
 result. Leave EFI off.
 
-Build the ISO yourself with `sudo scripts/build-iso.sh` (needs `mmdebstrap
-squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin` and a Tauri `.deb`
-already built).
+Prefer zero setup? Grab **`peluchinOs.ova`** from the release instead:
+_File → Import Appliance_ in VirtualBox, then Start. It comes pre-configured
+(2 GB RAM, 2 vCPU, VMSVGA, SATA disk) so nothing needs tweaking.
+
+Build the images yourself:
+
+```bash
+sudo scripts/build-iso.sh    # -> iso-build/peluchinOs-live.iso
+sudo scripts/build-ova.sh    # -> iso-build/peluchinOs.ova
+```
+
+(needs `mmdebstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin
+qemu-utils` and a Tauri `.deb` already built.)
 
 ## Apps
 
