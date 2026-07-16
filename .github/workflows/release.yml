@@ -10,7 +10,7 @@ on:
     inputs:
       tag:
         description: 'Release tag to publish'
-        default: 'v0.0.1'
+        default: 'v1.0.0'
         required: true
 
 permissions:
@@ -160,14 +160,16 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v0.0.1' }}
+          tag_name: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v1.0.0' }}
           target_commitish: ${{ github.sha }}
-          name: peluchinOs ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v0.0.1' }}
+          name: peluchinOs ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v1.0.0' }}
           draft: false
           prerelease: false
           generate_release_notes: false
           body: |
-            ## peluchinOs ${{ github.ref_name }}
+            ## peluchinOs ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v1.0.0' }}
+
+            **First stable release — boot verified on VirtualBox (VBoxVGA + VMSVGA), QEMU and bare metal.**
 
             A Windows 98/2000-flavoured desktop on a Linux-style boot, built with
             React 19 + Vite 6 + Tauri 2 (Rust), distributed three ways.
@@ -206,3 +208,10 @@ jobs:
             assets/*.AppImage
             assets/*.iso
             assets/SHA256SUMS
+
+      - name: Delete old v0.0.1 release and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete v0.0.1 --repo ${{ github.repository }} --cleanup-tag --yes || \
+            echo "v0.0.1 already gone — nothing to delete"
