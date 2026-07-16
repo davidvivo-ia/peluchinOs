@@ -26,15 +26,29 @@ VMDK="peluchinOs-disk.vmdk"
 OVF="peluchinOs.ovf"
 MF="peluchinOs.mf"
 
-echo ">>> converting ISO -> stream-optimized VMDK ..."
-qemu-img convert -f raw -O vmdk -o subformat=streamOptimized \
-  "$ISO" "$WORK/$VMDK"
-
-# Virtual disk capacity we advertise to the hypervisor. The ISO is ~420 MB;
-# give the guest a roomy 2 GiB virtual disk so live-boot's tmpfs overlay has
-# space. (The VMDK itself only stores the ISO bytes; this is the logical
-# size the descriptor claims.)
+# Give the guest a roomy 2 GiB virtual disk. We resize a raw copy BEFORE
+# converting so the VMDK header capacity matches the OVF DiskSection —
+# a mismatch there is another classic import failure. streamOptimized
+# skips all-zero grains, so the padding adds ~nothing to the file size.
 DISK_CAPACITY_BYTES=2147483648
+
+echo ">>> preparing 2 GiB raw disk from ISO ..."
+cp --sparse=always "$ISO" "$WORK/disk.raw"
+qemu-img resize -f raw "$WORK/disk.raw" "$DISK_CAPACITY_BYTES"
+
+echo ">>> converting -> stream-optimized VMDK ..."
+qemu-img convert -f raw -O vmdk -o subformat=streamOptimized \
+  "$WORK/disk.raw" "$WORK/$VMDK"
+rm -f "$WORK/disk.raw"
+
+# qemu-img stamps streamOptimized VMDKs as header version 3. VirtualBox's
+# VMDK reader only accepts version <= 2 and aborts the import with
+# VERR_VD_VMDK_INVALID_FORMAT. Patch the 32-bit version field (offset 4,
+# right after the 'KDMV' magic) down to 1 — the layout is otherwise
+# identical and every hypervisor accepts it. This is the standard fix for
+# qemu-produced OVAs.
+printf '\x01' | dd of="$WORK/$VMDK" bs=1 seek=4 count=1 conv=notrunc status=none
+
 VMDK_FILE_SIZE=$(stat -c%s "$WORK/$VMDK")
 
 echo ">>> writing OVF descriptor ..."
