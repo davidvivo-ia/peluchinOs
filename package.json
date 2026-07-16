@@ -1,7 +1,7 @@
 {
   "name": "peluchinos",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "description": "A Windows 98/2000-inspired desktop environment built with modern web tech.",
   "scripts": {

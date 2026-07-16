@@ -10,6 +10,7 @@ export interface HostInfo {
   cwd: string
   epoch_ms: number
   tauri_version: string
+  allowed_roots: string[]
 }
 
 export interface HostReadResult {
@@ -50,6 +51,7 @@ export async function getHostInfo(): Promise<HostInfo> {
       cwd: '/',
       epoch_ms: Date.now(),
       tauri_version: 'n/a (browser mode)',
+      allowed_roots: [],
     }
   }
   try {

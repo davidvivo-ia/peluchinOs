@@ -38,7 +38,7 @@ const help: Command = {
 const ver: Command = {
   name: 'ver',
   description: 'Show OS version',
-  run: () => ({ stdout: 'peluchinOs [Version 0.0.1-fluffy]\n', exitCode: 0 }),
+  run: () => ({ stdout: 'peluchinOs [Version 1.0.0-fluffy]\n', exitCode: 0 }),
 }
 
 const uname: Command = {
@@ -257,7 +257,7 @@ const banner: Command = {
       '   ) __/ ) _) / (_/\\) \\/ (( (__  ) _ (  _)(_ /    /(  O )\\__ \\\n' +
       '  (__)  (____)\\____/\\____/ \\___)(_) (_)(____)\\_)__) \\__/ (___/\n' +
       '\n' +
-      '   peluchinOs 0.0.1-fluffy — Linux 6.18.5-peluchin — type `help` to begin\n\n',
+      '   peluchinOs 1.0.0-fluffy — Linux 6.18.5-peluchin — type `help` to begin\n\n',
     exitCode: 0,
   }),
 }

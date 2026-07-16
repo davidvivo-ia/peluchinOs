@@ -39,7 +39,7 @@ const t = (
 ): StaticItem => ({ kind: 'static', delay, lineKind, text, logLevel })
 
 const KERNEL_INTRO: QueueItem[] = [
-  t(0, 'tty', 'Welcome to peluchinOs 0.0.1-fluffy (Linux 6.18.5-peluchin)!'),
+  t(0, 'tty', 'Welcome to peluchinOs 1.0.0-fluffy (Linux 6.18.5-peluchin)!'),
   t(40, 'tty', ''),
   t(10, 'kernel', 'Linux version 6.18.5-peluchin (root@plushie-build) (gcc 14.1.0) #1 SMP'),
   t(30, 'kernel', 'Command line: BOOT_IMAGE=/peluchinOs ro quiet splash theme=win2k-hybrid'),
@@ -65,7 +65,7 @@ const REACHED_TARGETS: QueueItem[] = [
 
 const LOGIN_OUTRO: QueueItem[] = [
   t(160, 'tty', ''),
-  t(10, 'tty', 'peluchinOs 0.0.1-fluffy ttyS0'),
+  t(10, 'tty', 'peluchinOs 1.0.0-fluffy ttyS0'),
   t(220, 'tty', ''),
   t(60, 'tty', 'peluchinOs login: peluchin'),
   t(420, 'tty', 'Password: ********'),

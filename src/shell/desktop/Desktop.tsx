@@ -61,7 +61,7 @@ export function Desktop() {
     {
       label: 'Properties',
       onSelect: () => {
-        alert('peluchinOs 0.0.1-fluffy\nLinux 6.18.5-peluchin\nBuilt with React 19 + Vite 6.')
+        alert('peluchinOs 1.0.0-fluffy\nLinux 6.18.5-peluchin\nBuilt with React 19 + Vite 6.')
       },
     },
   ]

@@ -1,6 +1,6 @@
 [package]
 name = "peluchinos"
-version = "0.0.1"
+version = "1.0.0"
 description = "peluchinOs — a Windows 98/2000 desktop with a Linux-style boot"
 authors = ["peluchinOs contributors"]
 edition = "2021"

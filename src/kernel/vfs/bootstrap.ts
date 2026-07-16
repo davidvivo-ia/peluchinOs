@@ -3,7 +3,7 @@ import { vfs } from './vfs'
 
 const log = createLogger('vfs:bootstrap')
 
-const MOTD = `peluchinOs 0.0.1-fluffy (Linux 6.18.5-peluchin) ttyS0
+const MOTD = `peluchinOs 1.0.0-fluffy (Linux 6.18.5-peluchin) ttyS0
 
   Welcome to peluchinOs!
 
@@ -71,12 +71,35 @@ const DIRS: SeedDir[] = [
   { path: '/home/peluchin/Pictures' },
   { path: '/home/peluchin/Downloads' },
   { path: '/etc' },
+  { path: '/etc/apt' },
   { path: '/var' },
   { path: '/var/log' },
+  { path: '/var/lib' },
+  { path: '/var/lib/dpkg' },
   { path: '/tmp' },
   { path: '/usr' },
   { path: '/usr/bin' },
 ]
+
+const DPKG_STATUS = `Package: base-files
+Status: install ok installed
+Version: 13.0
+Description: peluchinOs base system files
+
+Package: peluchsh
+Status: install ok installed
+Version: 1.0.0
+Description: the peluchinOs shell
+
+Package: coreutils
+Status: install ok installed
+Version: 9.5-1
+Description: GNU core utilities (dir, ls, cat, echo, ...)
+`
+
+const APT_SOURCES = `# peluchinOs apt sources (simulated catalog)
+deb http://archive.peluchinos/ stable main toys apps
+`
 
 const FILES: SeedFile[] = [
   { path: '/etc/motd', content: MOTD },
@@ -91,6 +114,8 @@ const FILES: SeedFile[] = [
     path: '/var/log/kernel.log',
     content: '[    0.000000] (boot kernel log is captured live by the Event Viewer)\n',
   },
+  { path: '/var/lib/dpkg/status', content: DPKG_STATUS },
+  { path: '/etc/apt/sources.list', content: APT_SOURCES },
 ]
 
 export async function bootstrapFilesystem(): Promise<void> {

@@ -1,9 +1,15 @@
 import type { Command } from '../types'
 import { FS_COMMANDS } from './fs'
 import { PELUCHIN_COMMANDS } from './peluchin'
+import { PKG_COMMANDS } from './pkg'
 import { SYSTEM_COMMANDS } from './system'
 
-const ALL_COMMANDS: Command[] = [...FS_COMMANDS, ...SYSTEM_COMMANDS, ...PELUCHIN_COMMANDS]
+const ALL_COMMANDS: Command[] = [
+  ...FS_COMMANDS,
+  ...SYSTEM_COMMANDS,
+  ...PELUCHIN_COMMANDS,
+  ...PKG_COMMANDS,
+]
 
 const byName = new Map<string, Command>()
 for (const cmd of ALL_COMMANDS) {

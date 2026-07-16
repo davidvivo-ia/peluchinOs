@@ -177,8 +177,9 @@ jobs:
             ### 🟢 Bootable Live distribution
 
             - **`peluchinOs-live.iso`** — hybrid BIOS/UEFI ISO, ~400 MB. Boots in
-              QEMU/VirtualBox or on bare metal from USB. Linux 6.1 kernel +
-              live-boot + autologin + Xorg + matchbox kiosk + peluchinOs.
+              QEMU/VirtualBox or on bare metal from USB. Debian trixie userspace,
+              Linux 6.12 kernel + live-boot + autologin + Xorg + matchbox kiosk +
+              peluchinOs. Drop to a tty for real `apt` / `dpkg`.
 
               ```
               qemu-system-x86_64 -m 2G -cdrom peluchinOs-live.iso

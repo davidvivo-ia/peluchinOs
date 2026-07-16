@@ -22,12 +22,17 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")"/.. && pwd)"
 WORK="$ROOT/iso-build"
-DEB="$ROOT/src-tauri/target/release/bundle/deb/peluchinOs_0.0.1_amd64.deb"
 
-[ -f "$DEB" ] || {
+# Pick whatever .deb the Tauri bundler emitted, version-agnostic — the
+# filename carries the version (peluchinOs_<ver>_amd64.deb) so hardcoding
+# it means the ISO stops building the day the version bumps.
+DEB="$(ls -1 "$ROOT"/src-tauri/target/release/bundle/deb/peluchinOs_*_amd64.deb 2>/dev/null | head -n1 || true)"
+
+[ -n "$DEB" ] && [ -f "$DEB" ] || {
   echo "Build the Tauri .deb first: cd $ROOT && npm run tauri build"
   exit 1
 }
+echo ">>> using bundle: $DEB"
 
 mkdir -p "$WORK"/{chroot,iso-root/live,iso-root/boot/grub}
 cd "$WORK"
@@ -36,15 +41,16 @@ cd "$WORK"
 echo ">>> bootstrapping Debian trixie ..."
 rm -rf chroot && mkdir chroot
 mmdebstrap --variant=minbase \
-  --keyring=/usr/share/keyrings/debian-archive-bookworm-stable.gpg \
+  --keyring=/usr/share/keyrings/debian-archive-keyring.gpg \
   --include='linux-image-amd64,live-boot,systemd-sysv,dbus,kbd,sudo,
-            ca-certificates,xserver-xorg-core,xserver-xorg-legacy,
-            xserver-xorg-input-libinput,xserver-xorg-video-fbdev,
-            xserver-xorg-video-vesa,xserver-xorg-video-qxl,
-            xserver-xorg-video-vmware,xserver-xorg-video-modesetting,
-            xinit,x11-xserver-utils,matchbox-window-manager,libgtk-3-0,
-            libwebkit2gtk-4.1-0,libayatana-appindicator3-1,librsvg2-2,
-            libssl3,fonts-dejavu-core,locales' \
+            apt,apt-utils,dpkg,ca-certificates,xserver-xorg-core,
+            xserver-xorg-legacy,xserver-xorg-input-libinput,
+            xserver-xorg-video-fbdev,xserver-xorg-video-vesa,
+            xserver-xorg-video-qxl,xserver-xorg-video-vmware,
+            xserver-xorg-video-modesetting,xinit,x11-xserver-utils,
+            matchbox-window-manager,libgtk-3-0,libwebkit2gtk-4.1-0,
+            libayatana-appindicator3-1,librsvg2-2,libssl3,
+            fonts-dejavu-core,locales' \
   trixie chroot http://deb.debian.org/debian
 
 # 2/3/4. Install peluchinOs, autologin, kiosk session.
@@ -119,12 +125,24 @@ echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen >/dev/null
 
 cat > /etc/motd <<'MOTD'
-peluchinOs live image (Linux + peluchinOs shell)
+peluchinOs live image (Debian trixie / Linux 6.12 + peluchinOs shell)
 Auto-login as peluchin on tty1; Ctrl+Alt+F2..F6 for other ttys.
+
+This is a real Debian userspace. To install Debian packages, drop to a
+tty and use apt (needs network — NAT works out of the box in a VM):
+
+    sudo apt-get update
+    sudo apt-get install <package>
+
+or install a local .deb with dpkg:
+
+    sudo dpkg -i <package>.deb
 MOTD
 
+# Keep apt usable: drop the cached .debs (saves ISO space) but leave the
+# sources.list in place so `apt-get update` works on first use.
 apt-get clean
-rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 EOF
 
 # 5. Stage kernel + initrd, write GRUB config, squash, build ISO.
@@ -147,7 +165,7 @@ set color_normal=light-gray/black
 set color_highlight=black/cyan
 
 echo ""
-echo "   peluchinOs 0.0.1-fluffy - Linux 6.1 - Live ISO"
+echo "   peluchinOs 1.0.0-fluffy - Debian trixie / Linux 6.12 - Live ISO"
 echo "   Boot starts in 30 s. Use up/down + Enter to choose."
 echo ""
 

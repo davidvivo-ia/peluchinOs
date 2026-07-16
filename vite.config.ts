@@ -13,6 +13,12 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      // Never descend into build outputs. iso-build/chroot is a Debian
+      // rootfs full of circular symlinks (e.g. /bin/X11 -> .) that make the
+      // file watcher throw ELOOP and crash the dev server.
+      ignored: ['**/iso-build/**', '**/src-tauri/target/**', '**/dist/**'],
+    },
   },
   clearScreen: false,
 })

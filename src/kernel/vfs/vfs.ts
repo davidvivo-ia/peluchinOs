@@ -213,7 +213,12 @@ class Vfs {
     })
 
     if (srcNode.type === 'directory') {
-      const descendants = await db.nodes.where('parentPath').startsWith(src).toArray()
+      // Match true descendants only. `where('parentPath').startsWith(src)`
+      // wrongly matched siblings sharing a prefix — renaming /foo would also
+      // rewrite /foobar's children. Anchor on the full path with a trailing
+      // slash so only nodes strictly under src/ are rewritten, at any depth.
+      const prefix = `${src}/`
+      const descendants = await db.nodes.where('path').startsWith(prefix).toArray()
       for (const d of descendants) {
         const newPath = dst + d.path.slice(src.length)
         const newParentPath = dirname(newPath)

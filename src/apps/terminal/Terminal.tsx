@@ -18,7 +18,7 @@ interface OutLine {
 }
 
 const INITIAL_BANNER =
-  'peluchinOs 0.0.1-fluffy — Linux 6.18.5-peluchin\nType "help" for a list of commands.\n'
+  'peluchinOs 1.0.0-fluffy — Linux 6.18.5-peluchin\nType "help" for a list of commands.\n'
 
 export function Terminal({ window: w }: { window: WindowState }) {
   const [lines, setLines] = useState<OutLine[]>([{ id: 0, stream: 'info', text: INITIAL_BANNER }])
